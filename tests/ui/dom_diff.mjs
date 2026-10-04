@@ -87,6 +87,7 @@ const DEVIATIONS = {
   'go-sug-type': 'TYPE: matching frontmatter types',
   'go-sug-accent': 'ACCENT: matching accent names',
   'go-sug-at': 'AT: the rev as typed, then matching commits',
+  help: 'the keys okt adds (space, u in files)',
 };
 
 function norm(s, sel) {
@@ -143,8 +144,8 @@ for (const [name, act, sels, wait] of STEPS) {
   if (name in DEVIATIONS) {
     if (bad.length) {
       devs++;
-      const rows = await okt.page.evaluate(() => [...document.querySelectorAll('#gosug .gs')].slice(0, 3).map(e => e.innerText.replace(/\n/g, ' ')));
-      console.log(`deviation ${name} (${DEVIATIONS[name]}): okt ${JSON.stringify(rows)}`);
+      const rows = name.startsWith('go-sug') ? await okt.page.evaluate(() => [...document.querySelectorAll('#gosug .gs')].slice(0, 3).map(e => e.innerText.replace(/\n/g, ' '))) : [];
+      console.log(`deviation ${name} (${DEVIATIONS[name]})${rows.length ? ': okt ' + JSON.stringify(rows) : ''}`);
     } else {
       fails++;
       console.log(`NO DEVIATION ${name}: expected ${DEVIATIONS[name]}`);
