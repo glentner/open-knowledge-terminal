@@ -7,11 +7,10 @@ updates itself as files are saved and commits land.
 
 `okt` is a Rust rebuild of the KB's `bin/terminal.py` with the same interface: the same layout,
 styling, keys and commands, the same JSON API, byte for byte, and pixel-for-pixel the same pages,
-apart from three bugs of the reference that okt fixes (see Known differences). What changed is
-underneath. The server is one native binary. The client is Rust compiled to WebAssembly. It draws
-the graph on a canvas instead of restyling an SVG of a thousand elements, and it updates lists in
-place instead of re-rendering them, so panning, zooming, hovering and arrowing through lists stay
-at frame rate.
+apart from a few deliberate improvements (see Known differences). What changed is underneath. The
+server is one native binary. The client is Rust compiled to WebAssembly. It draws the graph on a
+canvas instead of restyling an SVG of a thousand elements, and it updates lists in place instead of
+re-rendering them, so panning, zooming, hovering and arrowing through lists stay at frame rate.
 
 ## Install
 
@@ -35,8 +34,10 @@ okt --help
 ```
 
 It serves `http://127.0.0.1:6580/` by default (6580 spells OKT on a keypad). The page installs as
-an app (Chrome: install from the address bar; Safari: File › Add to Dock). Inside, `?` lists every
-key and command; `/` or `:` focuses the GO bar.
+an app (Chrome: install from the address bar; Safari: File › Add to Dock). Once it is installed,
+`okt` and `okt --detach` bring that app to the front instead of opening a tab, whatever it was
+named, which makes `okt --detach` a good target for a launcher hotkey. Inside, `?` lists every key
+and command; `/` or `:` focuses the GO bar.
 
 Useful flags: `--theme terminal|dark|light`, `--accent '#ffa028'`, `--font "Berkeley Mono"`,
 `--editor 'code --goto'`, `--collapse N` (folders with more direct files start collapsed),
@@ -77,6 +78,13 @@ All deliberate, and marked in the code:
   settings live under `okt:` in local storage, and POSTs carry `X-OKT` (`X-KB-Terminal` is
   accepted too). The background log and the start hint name `okt`.
 - The watcher reacts to file events in about 0.2 s instead of polling every 2 s.
+- On macOS the installed web app is found by the address it was installed from, then by the
+  `--app` name. The reference only tries the name, which misses when Safari named the Dock app
+  after the manifest's short name or something typed in its dialog, and opens a tab instead.
+- Markdown tables: a column is never narrower than its longest word (links may still break),
+  short cells (a word, number or identifier up to 24 characters, any text up to 12) stay on one
+  line, and a wide table may run past the prose measure to the edge of the pane. In the reference
+  every column can shrink to one letter while the longest takes the width.
 - Three bugs of the reference are fixed:
   - Hollow graph shapes (records, external systems) are outlined in their family color, as the
     legend draws them. In the reference a stylesheet rule overrides their stroke and they paint
@@ -87,8 +95,9 @@ All deliberate, and marked in the code:
   - A node that flashed after a change gets its selection ring back when the flash ends. In the
     reference the ring stays hidden until the graph is rebuilt.
 
-`tests/ui/dom_diff.mjs` expects its GO-suggestion steps for these commands to differ, and the
-graph screenshots differ where the hollow shapes paint.
+`tests/ui/dom_diff.mjs` expects its GO-suggestion steps for these commands to differ and ignores
+the class that marks short table cells; the graph screenshots differ where the hollow shapes
+paint, and content screenshots where tables lay out differently.
 
 ## License
 
