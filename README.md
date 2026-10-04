@@ -88,10 +88,18 @@ All deliberate, and marked in the code:
 - On macOS the installed web app is found by the address it was installed from, then by the
   `--app` name. The reference only tries the name, which misses when Safari named the Dock app
   after the manifest's short name or something typed in its dialog, and opens a tab instead.
-- FILES keys: space opens or closes the selected folder, or shows a file in the graph; `u` goes up
-  to the parent folder and folds everything under it (at the top, the whole tree); and closing a
-  folder, by any key or click, folds its subfolders too, so it reopens one level deep. The help
-  lists them.
+- Keys the reference doesn't have (`?` lists them all, with your pins):
+  - FILES: space opens or closes the selected folder, or shows a file in the graph; `u` goes up
+    to the parent folder and folds everything under it (at the top, the whole tree); and closing
+    a folder, by any key or click, folds its subfolders too, so it reopens one level deep.
+  - GRAPH: `j`/`k` step through the selection's connections in the order the inspector lists
+    them (a dashed ring, the card and the hint show where), Enter or space goes there, esc stops;
+    with no walk, space opens or closes the selected folder and Enter shows a file's content;
+    `z` zooms to the selection and its neighbors.
+  - Anywhere: `J`/`K` scroll the inspector, `s` switches between source and rendered, `y` copies
+    the path, `m` pins the selection and `1`–`9` go to the pins (kept per KB), `n`/`N` step
+    through FIND matches and on into the next or previous result file, and `E`/`O`/`F` edit,
+    open and reveal, as the buttons do.
 - Markdown tables: a column is never narrower than its longest word (links may still break),
   short cells (a word, number or identifier up to 24 characters, any text up to 12) stay on one
   line, and a wide table may run past the prose measure to the edge of the pane. In the reference
