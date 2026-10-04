@@ -28,7 +28,7 @@ make install            # builds the client, embeds it in the server, installs ~
 ```sh
 okt                     # index the KB (the git repo you're in, or ~/KB), serve it, open it
 okt --kb ~/KB --detach  # run in the background (log: ~/Library/Logs/okt.log or ~/.local/state/okt.log)
-okt --stop              # stop the background server
+okt --stop              # stop the background server (this KB's, else the only one running)
 okt --check             # index once and list broken links (exit 1 if any)
 okt --help
 ```
@@ -36,8 +36,9 @@ okt --help
 It serves `http://127.0.0.1:6580/` by default (6580 spells OKT on a keypad). The page installs as
 an app (Chrome: install from the address bar; Safari: File › Add to Dock). Once it is installed,
 `okt` and `okt --detach` bring that app to the front instead of opening a tab, whatever it was
-named, which makes `okt --detach` a good target for a launcher hotkey. Inside, `?` lists every key
-and command; `/` or `:` focuses the GO bar.
+named, which makes `okt --detach` a good target for a launcher hotkey. After `make install`, the
+next `okt` or `okt --detach` replaces a server still running the previous build, and the open app
+reloads itself. Inside, `?` lists every key and command; `/` or `:` focuses the GO bar.
 
 Useful flags: `--theme terminal|dark|light`, `--accent '#ffa028'`, `--font "Berkeley Mono"`,
 `--editor 'code --goto'`, `--collapse N` (folders with more direct files start collapsed),
@@ -78,6 +79,11 @@ All deliberate, and marked in the code:
   settings live under `okt:` in local storage, and POSTs carry `X-OKT` (`X-KB-Terminal` is
   accepted too). The background log and the start hint name `okt`.
 - The watcher reacts to file events in about 0.2 s instead of polling every 2 s.
+- The background server: `okt --stop` without `--kb` stops the server for this directory's KB or,
+  failing that, the only one running (the default KB depends on the directory, where the
+  reference's was always its own repo). `okt` and `okt --detach` restart a server that runs an
+  older build of the same binary instead of opening it; a server run from another binary, such as
+  a development build, is left alone. `/api/hello` reports the binary's path and time for this.
 - On macOS the installed web app is found by the address it was installed from, then by the
   `--app` name. The reference only tries the name, which misses when Safari named the Dock app
   after the manifest's short name or something typed in its dialog, and opens a tab instead.
