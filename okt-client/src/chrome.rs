@@ -468,6 +468,7 @@ pub fn wire_settings() {
 /// `showHelp()`
 pub fn show_help() {
     let el = dom::id("help");
+    #[rustfmt::skip]
     let keys: &[(&str, &str)] = &[
         ("/ or :", "focus the GO bar"),
         ("g f l t", "graph, files, log, table"),
@@ -475,9 +476,10 @@ pub fn show_help() {
         ("b", "blame on/off"),
         (", .", "step a file back or forward through its history"),
         ("e", "expand or collapse the folder in the graph"),
-        ("u", "up to the parent folder"),
+        ("u", "up to the parent folder; in files, fold everything under it"),
         ("[ ]", "back, forward"),
-        ("↑ ↓ ⏎", "move and open in lists"),
+        ("↑ ↓ ⏎", "move and open in lists (j k move too)"),
+        ("space", "files: open or close a folder, or show a file in the graph"),
         ("+ − 0", "zoom in, out, fit"),
         ("R", "rebuild the index"),
         ("esc", "close, then clear the selection"),

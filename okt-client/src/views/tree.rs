@@ -266,16 +266,34 @@ pub fn render() {
     }
 }
 
-/// Toggle a folder row open/closed (from its current arrow).
+/// Toggle a folder row open/closed (from its current arrow). Closing folds everything inside.
 fn toggle_row(id: &str, row: &web_sys::Element) {
     let o = dom::q_in(row, ".tw")
         .map(|t| dom::text(&t))
         .unwrap_or_default()
         != "▾";
-    cfg_mut().tree_open.insert(id.to_string(), o);
-    if !o {
-        s_mut().tree_auto.remove(id);
+    if o {
+        cfg_mut().tree_open.insert(id.to_string(), true);
+        save_settings();
+    } else {
+        fold(id);
     }
+}
+
+/// Deviation from the reference: closing a folder closes every folder under it too, so opening it
+/// again shows one level, not the subfolders that were open before.
+fn fold(id: &str) {
+    fold_below(id);
+    cfg_mut().tree_open.insert(id.to_string(), false);
+    s_mut().tree_auto.remove(id);
+    save_settings();
+}
+
+/// Close every folder under `id` (all of them for the root), leaving `id` as it is.
+fn fold_below(id: &str) {
+    let under = |k: &str| id == "." || (k.starts_with(id) && k != id);
+    cfg_mut().tree_open.retain(|k, _| !under(k));
+    s_mut().tree_auto.retain(|k| !under(k));
     save_settings();
 }
 
@@ -355,9 +373,7 @@ pub fn key(e: &KeyboardEvent) -> bool {
             if idx.is_dir(&id)
                 && dom::q_in(row, ".tw").map(|t| dom::text(&t)).as_deref() == Some("▾")
             {
-                cfg_mut().tree_open.insert(id.clone(), false);
-                s_mut().tree_auto.remove(&id);
-                save_settings();
+                fold(&id);
                 render();
                 return true;
             }
@@ -383,6 +399,40 @@ pub fn key(e: &KeyboardEvent) -> bool {
             } else {
                 nav::set_tab("content");
             }
+            return true;
+        }
+        // Deviation from the reference (home-row keys, as in ncdu): space opens or closes a folder
+        // and shows a file in the graph; u goes up to the parent folder and folds everything under
+        // it, so walking up tidies the tree behind you (at the top, the whole tree folds).
+        " " if id.is_some() => {
+            let id = id.unwrap();
+            if idx.is_dir(&id) {
+                toggle_row(&id, &rows[i as usize]);
+                render();
+            } else {
+                nav::set_view("graph", false);
+                crate::graph::focus_node(&id, None);
+            }
+            return true;
+        }
+        "u" => {
+            let cur = id.or_else(state::sel);
+            let Some(parent) = cur
+                .as_deref()
+                .and_then(|c| idx.node(c))
+                .and_then(|n| n.parent.clone())
+            else {
+                return true;
+            };
+            fold_below(&parent);
+            nav::select(
+                Some(&parent),
+                SelOpts {
+                    from: "tree",
+                    ..Default::default()
+                },
+            );
+            render();
             return true;
         }
         _ => return false,
