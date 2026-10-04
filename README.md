@@ -69,7 +69,8 @@ node tests/ui/shots.mjs /tmp/shots && python3 tests/ui/diff.py /tmp/shots
 ```
 
 Watch-mode checks (`tests/parity/watch_diff.py`, `tests/ui/live_diff.mjs`) run against a scratch
-clone of the KB. The browser tests need Playwright (`npm install` in `tests/`).
+clone of the KB. `tests/ui/keys.mjs` checks the keys okt adds on its own. The browser tests need
+Playwright (`npm install` in `tests/`).
 
 ### Known differences
 
@@ -87,6 +88,10 @@ All deliberate, and marked in the code:
 - On macOS the installed web app is found by the address it was installed from, then by the
   `--app` name. The reference only tries the name, which misses when Safari named the Dock app
   after the manifest's short name or something typed in its dialog, and opens a tab instead.
+- FILES keys: space opens or closes the selected folder, or shows a file in the graph; `u` goes up
+  to the parent folder and folds everything under it (at the top, the whole tree); and closing a
+  folder, by any key or click, folds its subfolders too, so it reopens one level deep. The help
+  lists them.
 - Markdown tables: a column is never narrower than its longest word (links may still break),
   short cells (a word, number or identifier up to 24 characters, any text up to 12) stay on one
   line, and a wide table may run past the prose measure to the edge of the pane. In the reference
@@ -101,7 +106,7 @@ All deliberate, and marked in the code:
   - A node that flashed after a change gets its selection ring back when the flash ends. In the
     reference the ring stays hidden until the graph is rebuilt.
 
-`tests/ui/dom_diff.mjs` expects its GO-suggestion steps for these commands to differ and ignores
+`tests/ui/dom_diff.mjs` expects its GO-suggestion and help steps to differ and ignores
 the class that marks short table cells; the graph screenshots differ where the hollow shapes
 paint, and content screenshots where tables lay out differently.
 
