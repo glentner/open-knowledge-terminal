@@ -657,7 +657,7 @@ pub struct G {
     anim: Option<Anim>,
     drag: Option<Drag>,
     built: bool,
-    /// offscreen layers for the spotlight's two dim levels
+    /// offscreen layers for the spotlight's two dim levels (empty while nothing is spotlit)
     layers: Vec<(HtmlCanvasElement, CanvasRenderingContext2d)>,
 }
 
@@ -1579,6 +1579,15 @@ fn draw(now: f64) {
                 ctx.set_global_alpha(1.0);
             }
         }
+    } else {
+        // the layers are as big as the pane: give their memory back while nothing is spotlit
+        // (one layer reused for both levels would do, but costs a copy-on-write per frame)
+        for (lc, _) in &gs.layers {
+            if lc.width() != 0 {
+                lc.set_width(0);
+                lc.set_height(0);
+            }
+        }
     }
     for (i, n) in gs.nodes.iter().enumerate() {
         if level(i, n) == 1.0 {
@@ -1961,6 +1970,8 @@ pub fn wire() {
     let layers = (0..2)
         .filter_map(|_| {
             let c: HtmlCanvasElement = dom::doc().create_element("canvas").ok()?.dyn_into().ok()?;
+            c.set_width(0);
+            c.set_height(0);
             let x: CanvasRenderingContext2d =
                 c.get_context("2d").ok().flatten()?.dyn_into().ok()?;
             Some((c, x))

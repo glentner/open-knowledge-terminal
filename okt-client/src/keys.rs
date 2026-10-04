@@ -558,8 +558,10 @@ pub fn wire() {
                 dom::remove_class(&dom::id("split"), "drag");
                 let w = dom::win();
                 let _ = w.remove_event_listener_with_callback("pointermove", &mv_fn);
-                if let Some(f) = up_slot2.borrow().as_ref() {
-                    let _ = w.remove_event_listener_with_callback("pointerup", f);
+                // taking the handle out breaks the cycle (this closure -> slot -> its own
+                // function), so both closures are freed once the drag ends
+                if let Some(f) = up_slot2.borrow_mut().take() {
+                    let _ = w.remove_event_listener_with_callback("pointerup", &f);
                 }
                 save_settings();
                 if s().view == "log" {

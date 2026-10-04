@@ -238,8 +238,16 @@ pub fn toast(title: &str, body: &str, err: bool) -> Element {
     );
     let host = dom::id("toasts");
     let _ = host.append_child(&el);
-    let e2 = el.clone();
-    dom::on(el.as_ref(), "click", move |_: MouseEvent| e2.remove());
+    // the toast comes back as currentTarget: a handler that captured `el` would hold it, and
+    // through it this listener, for the life of the page
+    dom::on(el.as_ref(), "click", |e: MouseEvent| {
+        if let Some(t) = e
+            .current_target()
+            .and_then(|t| t.dyn_into::<Element>().ok())
+        {
+            t.remove();
+        }
+    });
     let e3 = el.clone();
     dom::timeout(if err { 6000 } else { 3200 }, move || e3.remove());
     while host.children().length() > 5 {
