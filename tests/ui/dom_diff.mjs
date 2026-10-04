@@ -87,7 +87,7 @@ const DEVIATIONS = {
   'go-sug-type': 'TYPE: matching frontmatter types',
   'go-sug-accent': 'ACCENT: matching accent names',
   'go-sug-at': 'AT: the rev as typed, then matching commits',
-  help: 'the keys okt adds (space, u in files)',
+  help: 'the keys okt adds',
 };
 
 function norm(s, sel) {
