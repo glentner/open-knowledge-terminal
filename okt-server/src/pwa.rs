@@ -183,7 +183,7 @@ pub fn manifest(app_name: &str, theme: &str, root_display: &str) -> Value {
     })
 }
 
-fn short_name(app: &str) -> String {
+pub fn short_name(app: &str) -> String {
     if app == "Open Knowledge Terminal" {
         "OK Terminal".into()
     } else {

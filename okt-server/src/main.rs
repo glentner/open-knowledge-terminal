@@ -74,7 +74,7 @@ pub struct Args {
     /// open nothing (same as --open none)
     #[arg(long)]
     pub no_browser: bool,
-    /// name of the installed web app, for its manifest and for --open
+    /// name of the web app: its manifest name, and the one --open prefers when several are installed
     #[arg(long, default_value = "Open Knowledge Terminal", value_name = "NAME")]
     pub app: String,
     /// serve in the background and return once ready; if it is already running, just open it

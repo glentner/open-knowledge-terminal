@@ -39,6 +39,7 @@ percent-encoding = "2"
 html-escape = "0.2"
 idna = "1"
 libc = "0.2"
+plist = "1"
 
 # client
 wasm-bindgen = "0.2"
