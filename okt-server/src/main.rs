@@ -78,9 +78,11 @@ pub struct Args {
     #[arg(long, default_value = "Open Knowledge Terminal", value_name = "NAME")]
     pub app: String,
     /// serve in the background and return once ready; if it is already running, just open it
+    /// (restarting it first when it runs an older build of this binary)
     #[arg(long)]
     pub detach: bool,
-    /// stop the running server for this KB
+    /// stop the background server: the one for --kb, else for this directory's KB, else the only
+    /// one running
     #[arg(long)]
     pub stop: bool,
     /// polling interval in seconds, used only where file-system events are unavailable
@@ -170,6 +172,78 @@ fn probe(host: &str, port: u16) -> Option<Value> {
     }
 }
 
+/// Every okt server answering from `port` up to the first port where nothing answers (the ports a
+/// background server picks from).
+fn running(port: u16) -> Vec<(u16, Value)> {
+    let mut out = Vec::new();
+    for p in port..=port.saturating_add(20) {
+        match probe("127.0.0.1", p) {
+            Some(info) => {
+                if info.get("app").and_then(|a| a.as_str()) == Some(APP) {
+                    out.push((p, info));
+                }
+            }
+            None if p > port => break,
+            None => {}
+        }
+    }
+    out
+}
+
+fn serves(info: &Value, root: &Path) -> bool {
+    info.get("root").and_then(|r| r.as_str()) == Some(root.display().to_string().as_str())
+}
+
+/// This binary as it is on disk, `path@mtime`. A server reports the stamp it started with, so one
+/// started before `make install` replaced the binary no longer matches the binary now there.
+pub fn exe_stamp() -> String {
+    let Ok(exe) = std::env::current_exe() else {
+        return String::new();
+    };
+    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
+    let t = std::fs::metadata(&exe)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{}@{t}", exe.display())
+}
+
+/// Whether a running server is an older build of this same binary: the same path with another
+/// modification time, or a server from before the stamp existed (0.1.1 and earlier). A server
+/// started from another binary, such as a development build, is left alone.
+fn stale(info: &Value, mine: &str) -> bool {
+    let Some(theirs) = info.get("exe").and_then(|v| v.as_str()) else {
+        return true;
+    };
+    let path = |s: &str| s.rsplit_once('@').map(|(p, _)| p.to_string());
+    theirs != mine && path(theirs) == path(mine)
+}
+
+/// SIGTERM a server and wait, up to 5 s, until its port stops answering.
+fn stop_server(pid: i64, port: u16) -> bool {
+    unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    for _ in 0..50 {
+        if probe("127.0.0.1", port).is_none() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    false
+}
+
+/// Stop a server found running an older build so it can be replaced; false if it would not stop.
+fn retire(info: &Value, port: u16) -> bool {
+    let Some(pid) = info.get("pid").and_then(|v| v.as_i64()) else {
+        return false;
+    };
+    say(&format!(
+        "Open Knowledge Terminal on port {port} (pid {pid}) runs an older build; restarting it"
+    ));
+    stop_server(pid, port)
+}
+
 fn port_free(host: &str, port: u16) -> bool {
     TcpListener::bind((host, port)).is_ok()
 }
@@ -244,21 +318,22 @@ fn start_background(args: &Args, root: &Path) -> i32 {
     } else {
         args.port
     };
-    for p in port..=port + 20 {
-        let info = probe("127.0.0.1", p);
-        if let Some(info) = &info {
-            if info.get("root").and_then(|r| r.as_str()) == Some(&root.display().to_string()) {
-                let url = format!("http://127.0.0.1:{p}/");
-                say(&format!(
-                    "Open Knowledge Terminal is running at {url}{}",
-                    opened_note(&launch::open_ui(&url, &args.open, &args.app))
-                ));
-                return 0;
-            }
+    let mine = exe_stamp();
+    let mut port = port;
+    if let Some((p, info)) = running(port).into_iter().find(|(_, i)| serves(i, root)) {
+        if !stale(&info, &mine) {
+            let url = format!("http://127.0.0.1:{p}/");
+            say(&format!(
+                "Open Knowledge Terminal is running at {url}{}",
+                opened_note(&launch::open_ui(&url, &args.open, &args.app))
+            ));
+            return 0;
         }
-        if info.is_none() && p > port {
-            break;
+        if !retire(&info, p) {
+            eprintln!("okt: the server on port {p} did not stop; stop it and try again");
+            return 1;
         }
+        port = p;
     }
     let port = pick_port(&args.host, port);
     if port == 0 {
@@ -342,39 +417,60 @@ fn start_background(args: &Args, root: &Path) -> i32 {
     1
 }
 
-fn stop_background(args: &Args, root: &Path) -> i32 {
+fn stop_background(args: &Args, root: Option<&Path>) -> i32 {
     let port = if args.port == 0 {
         DEFAULT_PORT
     } else {
         args.port
     };
-    for p in port..=port + 20 {
-        let info = probe("127.0.0.1", p);
-        if let Some(info) = &info {
-            if info.get("root").and_then(|r| r.as_str()) == Some(&root.display().to_string()) {
-                if let Some(pid) = info.get("pid").and_then(|v| v.as_i64()) {
-                    unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-                    for _ in 0..50 {
-                        if probe("127.0.0.1", p).is_none() {
-                            break;
-                        }
-                        std::thread::sleep(Duration::from_millis(100));
-                    }
-                    say(&format!(
-                        "Open Knowledge Terminal stopped (pid {pid}, port {p})"
-                    ));
-                    return 0;
-                }
-            }
+    let servers = running(port);
+    let of_root = |r: &Path| servers.iter().find(|(_, i)| serves(i, r));
+    // --kb names the one to stop; without it, the KB this directory belongs to, else the only one
+    // running (so `okt --stop` works from anywhere, as `bin/terminal.py --stop` did)
+    let target = match (args.kb.is_some(), root) {
+        (true, Some(r)) => of_root(r),
+        (true, None) => None,
+        (false, r) => r
+            .and_then(of_root)
+            .or_else(|| (servers.len() == 1).then(|| &servers[0])),
+    };
+    if let Some((p, info)) = target {
+        let kb = info
+            .get("root")
+            .and_then(|r| r.as_str())
+            .map(|r| util::display_path(Path::new(r)))
+            .unwrap_or_default();
+        let Some(pid) = info.get("pid").and_then(|v| v.as_i64()) else {
+            eprintln!("okt: the server on port {p} did not say its pid");
+            return 1;
+        };
+        if !stop_server(pid, *p) {
+            eprintln!("okt: the server on port {p} (pid {pid}) did not stop within 5 s");
+            return 1;
         }
-        if info.is_none() && p > port {
-            break;
-        }
+        say(&format!(
+            "Open Knowledge Terminal stopped (pid {pid}, port {p}, {kb})"
+        ));
+        return 0;
     }
-    say(&format!(
-        "Open Knowledge Terminal is not running for {}",
-        display_path(root)
-    ));
+    if servers.len() > 1 {
+        say("Several are running; pass --kb to choose:");
+        for (p, info) in &servers {
+            let kb = info.get("root").and_then(|r| r.as_str()).unwrap_or("?");
+            say(&format!(
+                "  {} on port {p}",
+                util::display_path(Path::new(kb))
+            ));
+        }
+        return 1;
+    }
+    match (args.kb.is_some(), root) {
+        (true, Some(r)) => say(&format!(
+            "Open Knowledge Terminal is not running for {}",
+            display_path(r)
+        )),
+        _ => say("Open Knowledge Terminal is not running"),
+    }
     1
 }
 
@@ -491,7 +587,15 @@ fn main() {
             std::process::exit(2);
         }
     }
-    let root = match find_kb(&args.kb) {
+    let found = find_kb(&args.kb);
+    if args.stop {
+        if let (Err(e), true) = (&found, args.kb.is_some()) {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+        std::process::exit(stop_background(&args, found.as_deref().ok()));
+    }
+    let root = match found {
         Ok(r) => r,
         Err(e) => {
             eprintln!("{e}");
@@ -501,9 +605,6 @@ fn main() {
     let loopback = ["127.0.0.1", "localhost", "::1"].contains(&args.host.as_str());
     if !loopback {
         args.require_token = true;
-    }
-    if args.stop {
-        std::process::exit(stop_background(&args, &root));
     }
     if args.detach {
         if !loopback {
@@ -534,20 +635,29 @@ fn main() {
     if port != 0 {
         let probe_host = if loopback { "127.0.0.1" } else { "127.0.0.1" };
         if let Some(existing) = probe(probe_host, port) {
-            if existing.get("root").and_then(|r| r.as_str()) == Some(&root.display().to_string()) {
-                let url = format!(
-                    "http://{}:{port}/",
-                    if loopback {
-                        "127.0.0.1"
-                    } else {
-                        args.host.as_str()
+            if serves(&existing, &root) {
+                if stale(&existing, &exe_stamp()) {
+                    if !retire(&existing, port) {
+                        eprintln!(
+                            "okt: the server on port {port} did not stop; stop it and try again"
+                        );
+                        std::process::exit(1);
                     }
-                );
-                say(&format!(
-                    "already running at {url}{}",
-                    opened_note(&launch::open_ui(&url, &args.open, &args.app))
-                ));
-                return;
+                } else {
+                    let url = format!(
+                        "http://{}:{port}/",
+                        if loopback {
+                            "127.0.0.1"
+                        } else {
+                            args.host.as_str()
+                        }
+                    );
+                    say(&format!(
+                        "already running at {url}{}",
+                        opened_note(&launch::open_ui(&url, &args.open, &args.app))
+                    ));
+                    return;
+                }
             }
         }
         let wanted = port;
@@ -600,6 +710,7 @@ fn main() {
     let app = Arc::new(App {
         root: root.clone(),
         build: build_hash(&args.accent),
+        exe: exe_stamp(),
         args: args.clone(),
         index: RwLock::new(idx),
         render: render::Renderer::new(),
@@ -693,4 +804,28 @@ fn random_token() -> String {
     }
     use base64::Engine;
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stale_servers() {
+        let mine = "/u/.local/bin/okt@200";
+        let hello = |exe: Option<&str>| match exe {
+            Some(e) => serde_json::json!({"app": "okt", "exe": e}),
+            None => serde_json::json!({"app": "okt"}),
+        };
+        assert!(stale(&hello(None), mine), "a server from before the stamp");
+        assert!(
+            stale(&hello(Some("/u/.local/bin/okt@100")), mine),
+            "replaced since it started"
+        );
+        assert!(!stale(&hello(Some(mine)), mine), "the same build");
+        assert!(
+            !stale(&hello(Some("/src/target/release/okt@300")), mine),
+            "another binary"
+        );
+    }
 }

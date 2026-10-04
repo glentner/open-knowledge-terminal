@@ -199,7 +199,7 @@ async fn dispatch(State(app): State<Arc<App>>, req: Request) -> Response {
     }
     if path == "/api/hello" {
         let r = Resp::json(
-            &json!({"app": crate::APP, "version": crate::VERSION, "root": app.root.display().to_string(), "pid": std::process::id(), "build": app.build}),
+            &json!({"app": crate::APP, "version": crate::VERSION, "root": app.root.display().to_string(), "pid": std::process::id(), "build": app.build, "exe": app.exe}),
         );
         return finish(&headers, head_only, r);
     }

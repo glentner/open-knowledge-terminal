@@ -23,6 +23,8 @@ pub struct App {
     pub editor: Vec<String>,
     pub started: f64,
     pub build: String,
+    /// `path@mtime` of the binary this server started from (see `exe_stamp`)
+    pub exe: String,
     pub token: Option<String>,
     pub allowed_hosts: RwLock<HashSet<String>>,
     pub commit_cache: Mutex<IndexMap<String, Value>>,
