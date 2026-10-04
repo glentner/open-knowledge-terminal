@@ -68,8 +68,10 @@ node tests/ui/shots.mjs /tmp/shots && python3 tests/ui/diff.py /tmp/shots
 Watch-mode checks (`tests/parity/watch_diff.py`, `tests/ui/live_diff.mjs`) run against a scratch
 clone of the KB. The browser tests need Playwright (`npm install` in `tests/`).
 
-Known differences, all deliberate: the logo reads OK; the background log and the start hint
-name `okt`; the watcher reacts to file events in about 0.2 s instead of polling every 2 s. Three
+Known differences, all deliberate: the name (the app is Open Knowledge Terminal and its logo
+reads OK, the default port is 6580, settings live under `okt:` in local storage, and POSTs carry
+`X-OKT`, though `X-KB-Terminal` is accepted too); the background log and the start hint name
+`okt`; the watcher reacts to file events in about 0.2 s instead of polling every 2 s. Three
 quirks of the reference are kept on purpose and marked in the code: hollow graph shapes (records,
 external systems) paint as background, the GO bar offers no suggestions for ACCENT, TYPE, SHOW
 and AT arguments, and a node that flashed after a change hides its selection ring until the
