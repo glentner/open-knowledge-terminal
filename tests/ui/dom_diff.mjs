@@ -1,5 +1,6 @@
 // Drive the reference (terminal.py) and okt through the same interactions and compare the HTML
-// of the panes after each step (the graph itself is compared by screenshots, not here).
+// of the panes after each step (the graph itself is compared by screenshots, not here). Steps in
+// DEVIATIONS cover okt's deliberate fixes (README, Known differences): those must differ.
 //   node tests/ui/dom_diff.mjs [--only name,...] [--show N]
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
@@ -69,6 +70,8 @@ const STEPS = [
   ['go-sug-cmd', async p => { await p.fill('#go', 'TABLE con'); await p.dispatchEvent('#go', 'input'); }, ['#gosug'], 700],
   ['go-sug-rev', async p => { await p.fill('#go', 'SHOW head'); await p.dispatchEvent('#go', 'input'); }, ['#gosug'], 700],
   ['go-sug-type', async p => { await p.fill('#go', 'TYPE pe'); await p.dispatchEvent('#go', 'input'); }, ['#gosug'], 700],
+  ['go-sug-accent', async p => { await p.fill('#go', 'ACCENT g'); await p.dispatchEvent('#go', 'input'); }, ['#gosug'], 700],
+  ['go-sug-at', async p => { await p.fill('#go', 'AT HEAD'); await p.dispatchEvent('#go', 'input'); }, ['#gosug'], 700],
   ['go-sug-theme', async p => { await p.fill('#go', 'THEME d'); await p.dispatchEvent('#go', 'input'); }, ['#gosug'], 700],
   ['go-sug-path', async p => { await p.fill('#go', 'OPEN inbox'); await p.dispatchEvent('#go', 'input'); }, ['#gosug'], 700],
   ['go-sug-hash', async p => { await p.fill('#go', 'eb46'); await p.dispatchEvent('#go', 'input'); }, ['#gosug'], 700],
@@ -77,6 +80,14 @@ const STEPS = [
   ['settings', async p => { await p.keyboard.press('Escape'); await p.click('#setbtn'); }, ['#settings'], 600],
   ['theme-dark', async p => { await p.click('#settings [data-theme="dark"]'); }, ['#settings'], 900],
 ];
+
+// the reference lists only the command itself for these arguments (a dangling else); okt suggests
+const DEVIATIONS = {
+  'go-sug-rev': 'SHOW: the rev as typed, then matching commits',
+  'go-sug-type': 'TYPE: matching frontmatter types',
+  'go-sug-accent': 'ACCENT: matching accent names',
+  'go-sug-at': 'AT: the rev as typed, then matching commits',
+};
 
 function norm(s, sel) {
   if (s == null) return s;
@@ -108,7 +119,7 @@ async function open(base) {
   return { page, errors };
 }
 const ref = await open(REF), okt = await open(OKT);
-let fails = 0, steps = 0;
+let fails = 0, steps = 0, devs = 0;
 for (const [name, act, sels, wait] of STEPS) {
   if (only && !only.includes(name)) {
     // still perform the step so later steps see the same state
@@ -128,7 +139,16 @@ for (const [name, act, sels, wait] of STEPS) {
     const a = norm(ra[i], s), b = norm(oa[i], s);
     if (a !== b) bad.push([s, a, b]);
   });
-  if (bad.length) {
+  if (name in DEVIATIONS) {
+    if (bad.length) {
+      devs++;
+      const rows = await okt.page.evaluate(() => [...document.querySelectorAll('#gosug .gs')].slice(0, 3).map(e => e.innerText.replace(/\n/g, ' ')));
+      console.log(`deviation ${name} (${DEVIATIONS[name]}): okt ${JSON.stringify(rows)}`);
+    } else {
+      fails++;
+      console.log(`NO DEVIATION ${name}: expected ${DEVIATIONS[name]}`);
+    }
+  } else if (bad.length) {
     fails++;
     console.log(`DIFF ${name}: ${bad.map(x => x[0]).join(', ')}`);
     for (const [s, a, b] of bad.slice(0, SHOW)) {
@@ -143,5 +163,5 @@ for (const [name, act, sels, wait] of STEPS) {
   }
 }
 for (const [n, x] of [['ref', ref], ['okt', okt]]) if (x.errors.length) console.log(`${n} console errors:`, x.errors.slice(0, 8).join(' | '));
-console.log(`steps ${steps}, differing ${fails}`);
+console.log(`steps ${steps}, differing ${fails}, deliberate deviations ${devs}/${Object.keys(DEVIATIONS).length}`);
 await browser.close();
