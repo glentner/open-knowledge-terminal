@@ -468,15 +468,10 @@ fn suggestions(raw: &str) -> Vec<Sug> {
                 run: Run::Cmd(format!("{} {fill}", cmd.k)),
             });
         };
-        // The reference's if/else chain here has a dangling `else`: the branches after "theme"
-        // attach to the `if` inside the theme loop, so ACCENT, TYPE, SHOW and AT never list
-        // anything but the command itself. Kept that way for parity; flip to offer them.
-        const ARG_SUGGESTIONS_PAST_THEME: bool = false;
-        let arg = match cmd.arg {
-            Some("accent") | Some("type") | Some("rev") if !ARG_SUGGESTIONS_PAST_THEME => None,
-            a => a,
-        };
-        match arg {
+        // Deviation from the reference: ACCENT, TYPE, SHOW and AT get their suggestions. The
+        // reference's if/else chain has a dangling `else` (the branches after "theme" attach to
+        // the `if` inside the theme loop), so they only ever list the command itself.
+        match cmd.arg {
             Some("folder") => {
                 let list: Vec<&Node> = if !q.is_empty() {
                     match_nodes(&idx, &q, &|n| n.t == "dir", 12)
@@ -529,8 +524,9 @@ fn suggestions(raw: &str) -> Vec<Sug> {
                         *types.entry(t.clone()).or_insert(0) += 1;
                     }
                 }
+                // a Map in the reference: insertion order, then a stable sort by count
                 let ql = js::lower(&q);
-                let mut tv: Vec<(String, usize)> = js::order_keys(&types)
+                let mut tv: Vec<(String, usize)> = types
                     .into_iter()
                     .filter(|(t, _)| t.starts_with(&ql))
                     .collect();
@@ -540,6 +536,11 @@ fn suggestions(raw: &str) -> Vec<Sug> {
                 }
             }
             Some("rev") => {
+                // the rev as typed comes first, so Enter runs it (HEAD~5, a branch, a tag); the
+                // recent commits whose hash or subject match follow, to pick with the arrows
+                if !q.is_empty() {
+                    add(format!("{} {q}", cmd.k), q.clone(), desc(cmd));
+                }
                 if let Some(ld) = s().log_data.clone() {
                     let ql = js::lower(&q);
                     for c in ld

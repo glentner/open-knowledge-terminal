@@ -532,6 +532,8 @@ struct VNode {
     fam: String,
     shape: Path2d,
     fill: &'static str, // "accent" | "bg" | "fam"
+    /// records and external systems: outlined in the family color, filled with the background
+    hollow: bool,
     sw: f64,
     r: f64,
     halo_r: f64,
@@ -791,6 +793,7 @@ pub fn build(flash: &[String]) {
             fam,
             shape: Path2d::new_with_path_string(&shape_d).unwrap(),
             fill,
+            hollow,
             sw,
             r,
             halo_r: js::parse_float(&to_fixed(r + 4.0, 1)),
@@ -1359,8 +1362,9 @@ fn frame_tick(now: f64) {
     draw(now);
     record_draw(dom::perf_now() - t0);
     let again = {
-        let gs = g();
-        gs.anim.is_some() || gs.flash.iter().any(|(_, t0)| now - t0 < 3200.0)
+        let mut gs = g();
+        gs.flash.retain(|(_, t0)| now - t0 < 3200.0);
+        gs.anim.is_some() || !gs.flash.is_empty()
     };
     if again {
         schedule();
@@ -1662,11 +1666,10 @@ impl Painter {
                 let e = ease_out((dt % 1600.0) / 1600.0);
                 (1.0 - e, 6.0 - 5.0 * e)
             }
-            // `.n.flash .halo { opacity: 0 }` outlasts the animation and, coming later in the
-            // stylesheet, beats `.n.sel .halo`: a flashed node shows no selection ring until
-            // the graph is rebuilt (the reference does this too)
-            Some(_) => (0.0, 2.0),
-            None => (if is_sel { 1.0 } else { 0.0 }, 2.0),
+            // Deviation from the reference: when the flash ends the ring is back. There
+            // `.n.flash .halo { opacity: 0 }` outlasts the animation and beats `.n.sel .halo`, so
+            // a flashed node shows no selection ring until the graph is rebuilt.
+            _ => (if is_sel { 1.0 } else { 0.0 }, 2.0),
         };
         if halo_op > 0.0 {
             ctx.set_global_alpha(halo_op);
@@ -1684,7 +1687,10 @@ impl Painter {
         };
         ctx.set_fill_style_str(fill);
         ctx.fill_with_path_2d(&n.shape);
-        ctx.set_stroke_style_str(&c.bg);
+        // Deviation from the reference: hollow shapes are outlined in their family color, as the
+        // legend draws them. There `.n .shape { stroke: var(--graph-bg) }` overrides the stroke
+        // attribute, so records and external systems paint as background.
+        ctx.set_stroke_style_str(if n.hollow { c.fam(&n.fam) } else { &c.bg });
         ctx.set_line_width(n.sw);
         ctx.stroke_with_path(&n.shape);
         if let Some(rr) = n.ring_r {
