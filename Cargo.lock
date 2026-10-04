@@ -1217,7 +1217,7 @@ dependencies = [
 
 [[package]]
 name = "okt-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "console_error_panic_hook",
  "indexmap",
@@ -1231,7 +1231,7 @@ dependencies = [
 
 [[package]]
 name = "okt-pygments"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fancy-regex",
  "once_cell",
@@ -1241,7 +1241,7 @@ dependencies = [
 
 [[package]]
 name = "okt-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ammonia",
  "axum",
