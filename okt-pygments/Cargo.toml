@@ -1,0 +1,14 @@
+[package]
+name = "okt-pygments"
+description = "Syntax highlighting that reproduces Pygments' HtmlFormatter output byte for byte"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+fancy-regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+once_cell = "1"
