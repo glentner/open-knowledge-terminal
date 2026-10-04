@@ -88,6 +88,8 @@ pub struct Settings {
     pub tree_open: IndexMap<String, bool>,
     pub table_cols: Option<IndexMap<String, Vec<String>>>,
     pub badge: Option<bool>,
+    /// okt only: up to nine pinned ids, for the keys 1-9 (m pins and unpins)
+    pub pins: Vec<String>,
     extra: Map<String, Value>,
 }
 
@@ -129,6 +131,7 @@ impl Settings {
             tree_open: IndexMap::new(),
             table_cols: None,
             badge: None,
+            pins: Vec::new(),
             extra: Map::new(),
         };
         let stored: Option<Map<String, Value>> = storage()
@@ -182,6 +185,13 @@ impl Settings {
                     )
                 }
                 ("badge", Value::Bool(x)) => s.badge = Some(*x),
+                ("pins", Value::Array(a)) => {
+                    s.pins = a
+                        .iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .take(9)
+                        .collect()
+                }
                 _ => {
                     s.extra.insert(k, v);
                 }
@@ -206,6 +216,9 @@ impl Settings {
         }
         if let Some(b) = self.badge {
             m.insert("badge".into(), json!(b));
+        }
+        if !self.pins.is_empty() {
+            m.insert("pins".into(), json!(self.pins));
         }
         Value::Object(m)
     }
@@ -292,6 +305,9 @@ pub struct State {
     pub mode: String,
     pub blame: bool,
     pub jump: Option<i64>,
+    /// okt only: after n/N opens a file at a FIND match, mark the first (1) or last (-1) match
+    /// on the jumped-to line as the current one
+    pub find_cur: Option<i64>,
     pub keep: Option<i64>,
     pub mark: Option<String>,
     pub log_data: Option<Rc<LogData>>,
@@ -330,6 +346,7 @@ impl State {
             mode: "rendered".into(),
             blame: false,
             jump: None,
+            find_cur: None,
             keep: None,
             mark: None,
             log_data: None,

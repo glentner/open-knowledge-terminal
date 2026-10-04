@@ -164,6 +164,87 @@ pub fn wire() {
     });
 }
 
+/// n and N (okt only): the next or previous FIND match. Within the open file they move between
+/// the highlighted matches; past the last (before the first) they open the next (previous) file
+/// in the results at its first (last) matching line, wrapping around the list.
+pub fn find_step(dir: i64) {
+    let l = s().list.clone();
+    let Some(ListData::Find { files, query, .. }) = l.as_deref() else {
+        toast(
+            "FIND",
+            "Nothing to step through; FIND something first",
+            true,
+        );
+        return;
+    };
+    if files.is_empty() || query.is_empty() {
+        toast("FIND", "No matching lines to step through", true);
+        return;
+    }
+    let sel = state::sel();
+    let here = sel
+        .as_deref()
+        .and_then(|x| files.iter().position(|f| f.path == x));
+    let body = dom::id("ibody");
+    let marks = dom::qa_in(&body, "mark.fm");
+    if here.is_some() && s().tab == "content" && !marks.is_empty() {
+        let next = match marks.iter().position(|m| dom::has_class(m, "cur")) {
+            Some(c) => Some(c as i64 + dir).filter(|n| (0..marks.len() as i64).contains(n)),
+            None => {
+                // nothing current yet: the first match in view going down, the last going up
+                let r = body.get_bounding_client_rect();
+                let pick = if dir > 0 {
+                    marks
+                        .iter()
+                        .position(|m| m.get_bounding_client_rect().top() >= r.top() + 30.0)
+                } else {
+                    marks
+                        .iter()
+                        .rposition(|m| m.get_bounding_client_rect().bottom() <= r.bottom())
+                };
+                pick.map(|x| x as i64)
+            }
+        };
+        if let Some(n) = next {
+            for m in &marks {
+                dom::remove_class(m, "cur");
+            }
+            let m = &marks[n as usize];
+            dom::add_class(m, "cur");
+            dom::scroll_into_view_block(m, web_sys::ScrollLogicalPosition::Center, false);
+            return;
+        }
+    }
+    let n = files.len() as i64;
+    let fi = match here {
+        Some(i) => (i as i64 + dir).rem_euclid(n),
+        None if dir > 0 => 0,
+        None => n - 1,
+    } as usize;
+    let f = &files[fi];
+    let ln = if dir > 0 {
+        f.matches.first()
+    } else {
+        f.matches.last()
+    }
+    .map(|(ln, _)| *ln as i64);
+    {
+        let mut st = s_mut();
+        st.jump = ln;
+        st.find_cur = ln.map(|_| dir);
+        st.mark = Some(query.clone());
+    }
+    nav::select(
+        Some(&f.path),
+        SelOpts {
+            from: "list",
+            tab: Some("content"),
+            mode: Some("source"),
+            ..Default::default()
+        },
+    );
+}
+
 /// `find(q)`
 pub async fn find(q: &str) {
     let q = js::trim(q).to_string();

@@ -28,5 +28,5 @@ web-sys = { workspace = true, features = [
   "ResizeObserver", "ResizeObserverEntry", "Performance", "Headers", "Request", "RequestInit", "RequestCache", "Response",
   "ServiceWorkerContainer", "Url", "UrlSearchParams", "Blob", "BlobPropertyBag",
   "TreeWalker", "NodeFilter", "Text", "DocumentFragment", "ScrollIntoViewOptions", "ScrollLogicalPosition",
-  "ScrollBehavior", "CharacterData", "css", "SvgElement", "console",
+  "ScrollBehavior", "ScrollToOptions", "CharacterData", "css", "SvgElement", "console",
 ] }

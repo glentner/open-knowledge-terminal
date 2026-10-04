@@ -374,6 +374,9 @@ fn on_key(e: KeyboardEvent) {
         }
     }
     if k == "Escape" {
+        if view == "graph" && graph::walk_stop() {
+            return;
+        }
         let settings = dom::id("settings");
         if !dom::hidden(&settings) {
             dom::set_hidden(&settings, true);
@@ -393,6 +396,40 @@ fn on_key(e: KeyboardEvent) {
             nav::select(None, SelOpts::default());
         }
         return;
+    }
+    // okt only (README, Known differences): walk the graph from the keyboard. j and k step through
+    // the selection's connections; Enter or space goes to the one marked, or else opens or
+    // closes the selected folder (space, Enter) or shows a file's content (Enter).
+    if view == "graph" {
+        let walked = match k.as_str() {
+            "j" | "ArrowDown" => {
+                graph::walk(1);
+                true
+            }
+            "k" | "ArrowUp" => {
+                graph::walk(-1);
+                true
+            }
+            "Enter" | " " => {
+                if let Some(t) = graph::walk_target() {
+                    nav::select(Some(&t), SelOpts::default());
+                } else if let Some(id) = sel.as_deref() {
+                    if idx.is_dir(id) {
+                        let r = graph::rep_of(id);
+                        let collapse = !(idx.is_dir(&r) && state::is_collapsed(&idx, &r));
+                        actions::expand_cmd("", collapse);
+                    } else if k == "Enter" {
+                        nav::set_tab("content");
+                    }
+                }
+                true
+            }
+            _ => false,
+        };
+        if walked {
+            e.prevent_default();
+            return;
+        }
     }
     let handled = match k.as_str() {
         "g" => {
@@ -467,6 +504,71 @@ fn on_key(e: KeyboardEvent) {
             graph::fit();
             true
         }
+        // okt only (README, Known differences): reading, finding, pins, hand-offs
+        "J" | "K" => {
+            let b = dom::id("ibody");
+            let o = web_sys::ScrollToOptions::new();
+            let half = b.client_height() as f64 / 2.0;
+            o.set_top(if k == "J" { half } else { -half });
+            o.set_behavior(web_sys::ScrollBehavior::Smooth);
+            b.scroll_by_with_scroll_to_options(&o);
+            true
+        }
+        "z" => {
+            if view != "graph" {
+                nav::set_view("graph", false);
+            }
+            graph::frame_selection();
+            true
+        }
+        "s" => {
+            let on_content = s().tab == "content";
+            {
+                let mut st = s_mut();
+                st.mode = if on_content && st.mode == "source" {
+                    "rendered".into()
+                } else {
+                    "source".into()
+                };
+                st.tab = "content".into();
+                st.commit = None;
+            }
+            insp::render();
+            nav::nav(false);
+            true
+        }
+        "y" => {
+            press("#ihead [data-copy], #ihead [data-copysha]", "COPY");
+            true
+        }
+        "n" => {
+            views::list::find_step(1);
+            true
+        }
+        "N" => {
+            views::list::find_step(-1);
+            true
+        }
+        "m" => {
+            actions::pin_toggle();
+            true
+        }
+        d if d.len() == 1 && matches!(d.as_bytes()[0], b'1'..=b'9') => {
+            actions::pin_jump((d.as_bytes()[0] - b'0') as usize);
+            true
+        }
+        "E" => {
+            press("#ihead [data-open=editor]", "EDIT");
+            true
+        }
+        "O" => {
+            press("#ihead [data-open=app]", "OPEN");
+            true
+        }
+        "F" => {
+            press("#ihead [data-open=reveal]", "REVEAL");
+            true
+        }
         "+" | "=" => {
             graph::zoom_by(1.35, None);
             true
@@ -479,6 +581,17 @@ fn on_key(e: KeyboardEvent) {
     };
     if handled {
         e.prevent_default();
+    }
+}
+
+/// Press one of the inspector header's buttons, so a key does exactly what the button does, and
+/// only where the button is offered.
+fn press(sel: &str, what: &str) {
+    match dom::q(sel).and_then(|b| b.dyn_into::<web_sys::HtmlElement>().ok()) {
+        Some(b) => b.click(),
+        None => {
+            toast(what, "Not offered for this selection", true);
+        }
     }
 }
 

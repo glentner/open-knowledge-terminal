@@ -481,6 +481,59 @@ fn edge_label(k: &str, out: bool) -> &'static str {
     }
 }
 
+/// What j and k step through in the graph (okt only): a folder's subfolders and files in tree
+/// order, then the Connections groups in the order the inspector shows them, each node once.
+pub fn walk_list(idx: &Idx, id: &str) -> Vec<(String, &'static str)> {
+    let mut out: Vec<(String, &'static str)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut push = |x: &str, label: &'static str| {
+        if x != id && idx.has(x) && seen.insert(x.to_string()) {
+            out.push((x.to_string(), label));
+        }
+    };
+    if idx.is_dir(id) {
+        let (dirs, files) = idx.sorted_kids(id, true);
+        for d in dirs {
+            push(d, "Subfolder");
+        }
+        for f in files {
+            push(f, "In this folder");
+        }
+    }
+    for k in ORDER {
+        for &ei in idx.out_of(id) {
+            let e = &idx.edges[ei];
+            if e.k == k {
+                push(&e.t, edge_label(k, true));
+            }
+        }
+    }
+    for k in ORDER {
+        for &ei in idx.in_of(id) {
+            let e = &idx.edges[ei];
+            if e.k == k {
+                push(&e.s, edge_label(k, false));
+            }
+        }
+    }
+    out
+}
+
+/// Mark the inspector's card for the node the graph walk is on (none: unmark).
+pub fn mark_chip(id: Option<&str>) {
+    for c in dom::qa("#ibody .nchip.kb") {
+        dom::remove_class(&c, "kb");
+    }
+    let Some(id) = id else { return };
+    for c in dom::qa("#ibody .nchip[data-go]") {
+        if dom::data(&c, "go").as_deref() == Some(id) {
+            dom::add_class(&c, "kb");
+            dom::scroll_into_view_nearest(&c);
+            break;
+        }
+    }
+}
+
 /// `connections(id)`
 fn connections(idx: &Idx, id: &str) -> String {
     let mut groups: Vec<(&str, Vec<(String, String)>)> = Vec::new();
@@ -1743,6 +1796,7 @@ fn after(n: Option<&Node>) {
     }
     if let Some(ln) = jump {
         s_mut().jump = None;
+        let find_cur = s_mut().find_cur.take();
         if let Some(el) = line_el(&body, ln) {
             dom::add_class(
                 &el,
@@ -1753,6 +1807,12 @@ fn after(n: Option<&Node>) {
                 },
             );
             dom::scroll_into_view_block(&el, web_sys::ScrollLogicalPosition::Center, false);
+            if let Some(d) = find_cur {
+                let marks = dom::qa_in(&el, "mark.fm");
+                if let Some(m) = if d < 0 { marks.last() } else { marks.first() } {
+                    dom::add_class(m, "cur");
+                }
+            }
         }
     } else if let Some(ln) = keep {
         s_mut().keep = None;

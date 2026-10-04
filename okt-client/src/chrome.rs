@@ -473,10 +473,18 @@ pub fn show_help() {
         ("/ or :", "focus the GO bar"),
         ("g f l t", "graph, files, log, table"),
         ("o c h", "overview, content, history"),
-        ("b", "blame on/off"),
+        ("s b", "source on/off, blame on/off"),
         (", .", "step a file back or forward through its history"),
+        ("j k", "graph: step through the selection's connections"),
+        ("⏎ space", "graph: go to the one marked; or open/close the folder"),
         ("e", "expand or collapse the folder in the graph"),
         ("u", "up to the parent folder; in files, fold everything under it"),
+        ("z", "zoom the graph to the selection and its neighbors"),
+        ("J K", "scroll the inspector down, up"),
+        ("n N", "next, previous FIND match"),
+        ("y", "copy the path"),
+        ("m 1–9", "pin the selection; go to a pin"),
+        ("E O F", "edit, open, reveal"),
         ("[ ]", "back, forward"),
         ("↑ ↓ ⏎", "move and open in lists (j k move too)"),
         ("space", "files: open or close a folder, or show a file in the graph"),
@@ -485,6 +493,18 @@ pub fn show_help() {
         ("esc", "close, then clear the selection"),
         ("?", "this help"),
     ];
+    let pins: String = {
+        let p = cfg().pins.clone();
+        if p.is_empty() {
+            "<dt>m</dt><dd style=\"color:var(--dim)\">pins the selection; then 1–9 go there</dd>"
+                .into()
+        } else {
+            p.iter()
+                .enumerate()
+                .map(|(i, id)| format!("<dt><kbd>{}</kbd></dt><dd>{}</dd>", i + 1, esc(id)))
+                .collect()
+        }
+    };
     let kd: String = keys
         .iter()
         .map(|(k, d)| format!("<dt><kbd>{}</kbd></dt><dd>{}</dd>", esc(k), esc(d)))
@@ -505,7 +525,7 @@ pub fn show_help() {
     dom::set_html(
         &el,
         &format!(
-            "<div class=\"helpbox\"><h3>OK TERMINAL · HELP</h3>\n    <div><h4>KEYS</h4><dl>{kd}</dl>\n    <h4>GRAPH</h4><dl><dt>click</dt><dd>shine a light on a node and everything it touches</dd><dt>double-click</dt><dd>expand or collapse a folder; empty space fits</dd><dt>drag, wheel</dt><dd>pan, zoom</dd><dt>accent arrows</dt><dd>links out; pale lines are links in</dd><dt>dashed</dt><dd>connections to external systems</dd></dl></div>\n    <div><h4>COMMANDS</h4><dl>{cd}</dl></div>\n    <div class=\"full\">Anything else you type opens the best-matching file or folder; a commit hash opens that commit; if nothing matches it runs FIND. The terminal is read-only; EDIT, OPEN and REVEAL hand the file to your apps.</div></div>"
+            "<div class=\"helpbox\"><h3>OK TERMINAL · HELP</h3>\n    <div><h4>KEYS</h4><dl>{kd}</dl>\n    <h4>GRAPH</h4><dl><dt>click</dt><dd>shine a light on a node and everything it touches</dd><dt>double-click</dt><dd>expand or collapse a folder; empty space fits</dd><dt>drag, wheel</dt><dd>pan, zoom</dd><dt>accent arrows</dt><dd>links out; pale lines are links in</dd><dt>dashed</dt><dd>connections to external systems</dd></dl>\n    <h4>PINS</h4><dl>{pins}</dl></div>\n    <div><h4>COMMANDS</h4><dl>{cd}</dl></div>\n    <div class=\"full\">Anything else you type opens the best-matching file or folder; a commit hash opens that commit; if nothing matches it runs FIND. The terminal is read-only; EDIT, OPEN and REVEAL hand the file to your apps.</div></div>"
         ),
     );
     dom::set_hidden(&el, false);

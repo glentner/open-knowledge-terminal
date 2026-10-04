@@ -47,6 +47,51 @@ pub fn open_with(how: &str, path: Option<&str>) {
     });
 }
 
+/// m (okt only): pin the selection, or unpin it. Up to nine pins, kept with the settings.
+pub fn pin_toggle() {
+    let Some(sel) = state::sel() else {
+        toast("PIN", "Select something to pin", true);
+        return;
+    };
+    let (msg, err) = {
+        let mut c = cfg_mut();
+        if let Some(i) = c.pins.iter().position(|p| *p == sel) {
+            c.pins.remove(i);
+            (format!("Unpinned {sel}"), false)
+        } else if c.pins.len() >= 9 {
+            (
+                "Nine pins already; press m on one to unpin it".to_string(),
+                true,
+            )
+        } else {
+            c.pins.push(sel.clone());
+            (format!("{} · {sel}", c.pins.len()), false)
+        }
+    };
+    if !err {
+        save_settings();
+    }
+    toast("PIN", &msg, err);
+}
+
+/// 1-9 (okt only): go to that pin.
+pub fn pin_jump(n: usize) {
+    let pin = state::cfg().pins.get(n.wrapping_sub(1)).cloned();
+    let Some(p) = pin else {
+        toast(
+            "PIN",
+            &format!("No pin {n}; press m to pin the selection"),
+            true,
+        );
+        return;
+    };
+    if state::idx().map(|i| i.has(&p)).unwrap_or(false) {
+        nav::select(Some(&p), nav::SelOpts::default());
+    } else {
+        toast("PIN", &format!("{p} is no longer in the KB"), true);
+    }
+}
+
 /// `rebuild()`
 pub fn rebuild() {
     chrome::set_live(Live::Busy);

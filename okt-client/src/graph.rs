@@ -6,6 +6,7 @@
 //! `.halo`, `.ebase`, `.ehot`, `.spotlit`, ...), once per animation frame and only when something
 //! changed. Input handlers never read layout; they update the view and schedule a frame.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 use std::rc::Rc;
@@ -18,6 +19,7 @@ use crate::js::{self, esc, fmt_n, num, to_fixed};
 use crate::model::{Idx, edge_group, fam_var, shape_of};
 use crate::state::{self, cfg, is_collapsed};
 use crate::theme;
+use crate::{chrome, insp};
 
 const R_ROOTFILES: f64 = 58.0;
 const R_TOP: f64 = 190.0;
@@ -650,6 +652,8 @@ pub struct G {
     decl_t: f64,
     decl_timer: i32,
     hover: Option<usize>,
+    /// the node the keyboard walk is on (okt only; see `walk`)
+    cursor: Option<usize>,
     flash: Vec<(usize, f64)>,
     w: f64,
     h: f64,
@@ -667,7 +671,7 @@ thread_local! {
     static GS: &'static std::cell::RefCell<G> = Box::leak(Box::new(std::cell::RefCell::new(G {
         canvas: None, ctx: None, k: 1.0, x: 0.0, y: 0.0, lay: Rc::new(Layout::default()), nodes: vec![], at: HashMap::new(),
         colors: None, base: vec![], hot: vec![], sel_vis: None, nbr: vec![], spotlit: false, spot: None, shown: vec![],
-        sk: 1.0, lab_sk: 0.0, decl_t: 0.0, decl_timer: 0, hover: None, flash: vec![], w: 0.0, h: 0.0, dpr: 1.0,
+        sk: 1.0, lab_sk: 0.0, decl_t: 0.0, decl_timer: 0, hover: None, cursor: None, flash: vec![], w: 0.0, h: 0.0, dpr: 1.0,
         host_rect: (0.0, 0.0, 0.0, 0.0), raf: 0, anim: None, drag: None, built: false, layers: vec![],
     })));
 }
@@ -861,7 +865,13 @@ pub fn build(flash: &[String]) {
         gs.colors = Some(Colors::read());
         gs.lab_sk = 0.0;
         gs.hover = None;
+        gs.cursor = None;
         gs.built = true;
+    }
+    if let Some(t) = walk_target() {
+        let mut gs = g();
+        let rep = gs.lay.rep_or(&t).to_string();
+        gs.cursor = gs.at.get(&rep).copied();
     }
     apply_view();
     update();
@@ -1679,6 +1689,17 @@ impl Painter {
             ctx.set_line_width(halo_w);
             ctx.stroke();
         }
+        // the keyboard walk's place: a dashed ring, as the reference draws a search hit
+        if gs.cursor == Some(i) {
+            ctx.set_global_alpha(0.9);
+            ctx.begin_path();
+            ctx.arc(0.0, 0.0, n.halo_r + 1.5, 0.0, PI * 2.0).ok();
+            ctx.set_stroke_style_str(&c.accent);
+            ctx.set_line_width(2.0);
+            set_dash(ctx, &[3.0, 2.5]);
+            ctx.stroke();
+            set_dash(ctx, &[]);
+        }
         ctx.set_global_alpha(1.0);
         let fill: &str = match n.fill {
             "accent" => &c.accent,
@@ -1720,7 +1741,7 @@ impl Painter {
             ctx.fill();
         }
         // label: opacity per the .n .lab rules
-        let hover = gs.hover == Some(i);
+        let hover = gs.hover == Some(i) || gs.cursor == Some(i);
         let lv = gs.shown.get(i).copied().unwrap_or(false);
         let lop = if n.kind == Kind::File && lv && !is_sel && !is_nbr {
             0.85
@@ -1805,6 +1826,163 @@ fn set_dash(ctx: &CanvasRenderingContext2d, d: &[f64]) {
         arr.push(&JsValue::from_f64(*v));
     }
     ctx.set_line_dash(&arr).ok();
+}
+
+// ---- keyboard: walking connections, framing the selection (okt only) --------------------------
+
+struct Walk {
+    from: String,
+    list: Vec<(String, &'static str)>,
+    i: Option<usize>,
+}
+
+thread_local! {
+    static WALK: RefCell<Option<Walk>> = const { RefCell::new(None) };
+}
+
+/// The node the walk is on, while it belongs to the current selection.
+pub fn walk_target() -> Option<String> {
+    let sel = state::sel()?;
+    WALK.with(|w| {
+        let w = w.borrow();
+        let w = w.as_ref().filter(|w| w.from == sel)?;
+        w.i.map(|i| w.list[i].0.clone())
+    })
+}
+
+/// j and k in the graph: step through the selection's connections in the order the inspector
+/// lists them (`insp::walk_list`), marking the one reached with a dashed ring, its label and its
+/// card, and saying where the walk is in the hint. Enter or space goes there; esc stops.
+pub fn walk(step: i64) {
+    let Some(idx) = state::idx() else { return };
+    let Some(sel) = state::sel() else {
+        chrome::toast(
+            "GRAPH",
+            "Select something first; j and k then step through its connections",
+            true,
+        );
+        return;
+    };
+    let got = WALK.with(|w| {
+        let mut w = w.borrow_mut();
+        if w.as_ref().is_none_or(|w| w.from != sel) {
+            *w = Some(Walk {
+                from: sel.clone(),
+                list: insp::walk_list(&idx, &sel),
+                i: None,
+            });
+        }
+        let w = w.as_mut().unwrap();
+        let n = w.list.len() as i64;
+        if n == 0 {
+            return None;
+        }
+        let i = match w.i {
+            None if step > 0 => 0,
+            None => n - 1,
+            Some(i) => (i as i64 + step).rem_euclid(n),
+        } as usize;
+        w.i = Some(i);
+        Some((w.list[i].0.clone(), w.list[i].1, i + 1, n as usize))
+    });
+    let Some((target, label, at, of)) = got else {
+        chrome::toast(
+            "GRAPH",
+            &format!("{} has no connections", idx.name_of(&sel)),
+            true,
+        );
+        return;
+    };
+    let (place, k, w, h) = {
+        let mut gs = g();
+        let rep = gs.lay.rep_or(&target).to_string();
+        gs.cursor = gs.at.get(&rep).copied();
+        let (s, ox, oy) = frame(&gs);
+        let sk = s * gs.k;
+        let (ex, ey) = (ox + gs.x * s, oy + gs.y * s);
+        let place = gs
+            .cursor
+            .map(|i| (ex + sk * gs.nodes[i].x, ey + sk * gs.nodes[i].y));
+        (place, gs.k, gs.w, gs.h)
+    };
+    // keep it in view: centre it, at the same zoom, when it is near or past an edge
+    if let Some((x, y)) = place {
+        if x < 60.0 || y < 60.0 || x > w - 60.0 || y > h - 60.0 {
+            focus_node(&target, Some(k));
+        }
+    }
+    insp::mark_chip(Some(&target));
+    let shown = if target.ends_with('/') {
+        target.clone()
+    } else {
+        idx.name_of(&target)
+    };
+    set_hint(&format!("{at}/{of} · {label} · {shown} · ⏎ go · esc"));
+    schedule();
+}
+
+/// Forget the walk (the selection moved, or esc). True when there was one to forget.
+pub fn walk_reset() -> bool {
+    let had = WALK.with(|w| w.borrow_mut().take()).is_some();
+    let drawn = g().cursor.take().is_some();
+    if had || drawn {
+        insp::mark_chip(None);
+        schedule();
+    }
+    had || drawn
+}
+
+/// esc in the graph: stop walking, and put the hint back.
+pub fn walk_stop() -> bool {
+    if walk_target().is_none() {
+        return false;
+    }
+    walk_reset();
+    update();
+    true
+}
+
+/// z: zoom so the selection and everything it touches fill the view (0 fits the whole graph).
+pub fn frame_selection() {
+    let Some(idx) = state::idx() else { return };
+    let Some(sel) = state::sel() else {
+        fit();
+        return;
+    };
+    let target = {
+        let gs = g();
+        let lay = gs.lay.clone();
+        let r = lay.rep_or(&sel).to_string();
+        let mut pts: Vec<(f64, f64)> = Vec::new();
+        for id in std::iter::once(r).chain(nbrs_of(&idx, &lay, Some(&sel))) {
+            if let Some(p) = lay.pos.get(&id) {
+                pts.push((p.x, p.y));
+            }
+        }
+        if pts.is_empty() || gs.w <= 0.0 {
+            return;
+        }
+        let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for (x, y) in &pts {
+            x0 = x0.min(*x);
+            y0 = y0.min(*y);
+            x1 = x1.max(*x);
+            y1 = y1.max(*y);
+        }
+        // room for labels, and never closer than a small neighborhood
+        let pad = 60.0;
+        let (bw, bh) = (
+            (x1 - x0 + 2.0 * pad).max(240.0),
+            (y1 - y0 + 2.0 * pad).max(240.0),
+        );
+        let s = screen_scale(&gs);
+        let k = ((gs.w / s) / bw).min((gs.h / s) / bh).clamp(0.4, 12.0);
+        let b = gs.lay.bbox;
+        let (cx, cy) = (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0);
+        let (mx, my) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+        (k, cx - mx * k, cy - my * k)
+    };
+    animate_to(target.0, target.1, target.2, 420.0);
 }
 
 // ---- input -----------------------------------------------------------------------------------

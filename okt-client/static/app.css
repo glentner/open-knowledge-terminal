@@ -333,6 +333,7 @@ a { color: inherit; }
 .conn { display: flex; flex-wrap: wrap; gap: 4px; }
 .nchip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line-2); padding: 0 6px; line-height: 19px; max-width: 100%; color: var(--ink-2); }
 .nchip:hover { border-color: var(--accent); color: var(--ink); }
+.nchip.kb { border-color: var(--accent); color: var(--ink); box-shadow: inset 0 0 0 1px var(--accent); } /* okt: the graph walk's place */
 .nchip i { width: 7px; height: 7px; flex: none; display: inline-block; }
 .nchip small { color: var(--dim); }
 .nchip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -397,6 +398,7 @@ a { color: inherit; }
 .bleg i { width: 8px; height: 8px; display: inline-block; }
 .bleg i.ramp { width: 46px; height: 4px; background: linear-gradient(90deg, color-mix(in oklab, var(--accent) 20%, var(--faint)), var(--accent)); }
 #ibody mark.fm { background: var(--accent-dim); color: var(--ink); box-shadow: 0 0 0 1px var(--accent); }
+#ibody mark.fm.cur { background: var(--accent); color: var(--bg); } /* okt: the match n/N is on */
 
 /* code highlighting (pygments classes) mapped to theme tokens */
 .src .k, .md .k, .src .kd, .md .kd, .src .kn, .md .kn, .src .kc, .md .kc, .src .kr, .md .kr, .src .kp, .md .kp, .src .ow, .md .ow { color: var(--accent-text); }

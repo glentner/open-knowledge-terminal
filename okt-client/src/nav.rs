@@ -23,6 +23,10 @@ pub fn select(id: Option<&str>, opts: SelOpts) {
             return;
         }
     }
+    let moved = id.map(String::from) != state::sel();
+    if moved {
+        graph::walk_reset(); // the walk belongs to the old selection
+    }
     {
         let mut st = s_mut();
         let changed = id.map(String::from) != st.sel;
