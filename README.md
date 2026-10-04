@@ -6,11 +6,12 @@ inspector that renders each file, its history, and its blame. It watches the rep
 updates itself as files are saved and commits land.
 
 `okt` is a Rust rebuild of the KB's `bin/terminal.py` with the same interface: the same layout,
-styling, keys and commands, the same JSON API, byte for byte, and pixel-for-pixel the same pages.
-What changed is underneath. The server is one native binary. The client is Rust compiled to
-WebAssembly. It draws the graph on a canvas instead of restyling an SVG of a thousand elements,
-and it updates lists in place instead of re-rendering them, so panning, zooming, hovering and
-arrowing through lists stay at frame rate.
+styling, keys and commands, the same JSON API, byte for byte, and pixel-for-pixel the same pages,
+apart from three bugs of the reference that okt fixes (see Known differences). What changed is
+underneath. The server is one native binary. The client is Rust compiled to WebAssembly. It draws
+the graph on a canvas instead of restyling an SVG of a thousand elements, and it updates lists in
+place instead of re-rendering them, so panning, zooming, hovering and arrowing through lists stay
+at frame rate.
 
 ## Install
 
@@ -68,14 +69,26 @@ node tests/ui/shots.mjs /tmp/shots && python3 tests/ui/diff.py /tmp/shots
 Watch-mode checks (`tests/parity/watch_diff.py`, `tests/ui/live_diff.mjs`) run against a scratch
 clone of the KB. The browser tests need Playwright (`npm install` in `tests/`).
 
-Known differences, all deliberate: the name (the app is Open Knowledge Terminal and its logo
-reads OK, the default port is 6580, settings live under `okt:` in local storage, and POSTs carry
-`X-OKT`, though `X-KB-Terminal` is accepted too); the background log and the start hint name
-`okt`; the watcher reacts to file events in about 0.2 s instead of polling every 2 s. Three
-quirks of the reference are kept on purpose and marked in the code: hollow graph shapes (records,
-external systems) paint as background, the GO bar offers no suggestions for ACCENT, TYPE, SHOW
-and AT arguments, and a node that flashed after a change hides its selection ring until the
-graph is rebuilt.
+### Known differences
+
+All deliberate, and marked in the code:
+
+- The name: the app is Open Knowledge Terminal and its logo reads OK, the default port is 6580,
+  settings live under `okt:` in local storage, and POSTs carry `X-OKT` (`X-KB-Terminal` is
+  accepted too). The background log and the start hint name `okt`.
+- The watcher reacts to file events in about 0.2 s instead of polling every 2 s.
+- Three bugs of the reference are fixed:
+  - Hollow graph shapes (records, external systems) are outlined in their family color, as the
+    legend draws them. In the reference a stylesheet rule overrides their stroke and they paint
+    as background.
+  - The GO bar suggests arguments for ACCENT, TYPE, SHOW and AT (accents, frontmatter types,
+    recent commits; for SHOW and AT the rev as typed comes first, so Enter runs it). In the
+    reference a dangling `else` means they only ever list the command itself.
+  - A node that flashed after a change gets its selection ring back when the flash ends. In the
+    reference the ring stays hidden until the graph is rebuilt.
+
+`tests/ui/dom_diff.mjs` expects its GO-suggestion steps for these commands to differ, and the
+graph screenshots differ where the hollow shapes paint.
 
 ## License
 
