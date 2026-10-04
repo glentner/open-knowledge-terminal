@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en" data-theme="terminal">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__APPNAME__</title>
+<meta name="theme-color" content="#000000">
+<meta name="application-name" content="__APPNAME__">
+<meta name="apple-mobile-web-app-title" content="__APPNAME__">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/app.css">
+<script id="boot" type="application/json">__BOOT__</script>
+<script type="module" src="/main.js"></script>
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand" title="Open Knowledge Terminal"><span class="logo">OK</span><span class="word">TERMINAL</span><span class="kbname" id="kbname"></span></div>
+    <form class="go" id="goform" autocomplete="off">
+      <label for="go" class="gol">GO<span>›</span></label>
+      <input id="go" spellcheck="false" placeholder="file, folder, or command — try LOG, FIND inbox, TABLE contact/, HELP" aria-label="Command line">
+      <div class="gosug" id="gosug" hidden></div>
+    </form>
+    <div class="chips">
+      <button class="chip live" id="live" title="Watching for saved files and new commits"><i></i><span>LIVE</span></button>
+      <button class="chip" id="headchip" title="HEAD"></button>
+      <button class="chip icon" id="refresh" title="Rebuild the index (R)">⟳</button>
+      <button class="chip icon" id="setbtn" title="Settings">⚙</button>
+      <button class="chip icon" id="helpbtn" title="Help (?)">?</button>
+    </div>
+  </header>
+
+  <nav class="fkeys" aria-label="Views">
+    <button class="fk" data-view="graph"><kbd>G</kbd>GRAPH</button>
+    <button class="fk" data-view="files"><kbd>F</kbd>FILES</button>
+    <button class="fk" data-view="log"><kbd>L</kbd>LOG</button>
+    <button class="fk" data-view="table"><kbd>T</kbd>TABLE</button>
+    <button class="fk" data-view="list"><kbd>/</kbd>RESULTS</button>
+    <div class="crumbs" id="crumbs"></div>
+  </nav>
+
+  <main class="panes" id="panes">
+    <section class="view" id="view">
+      <div class="vpane" id="v-graph">
+        <canvas id="graph" aria-label="Knowledge graph"></canvas>
+        <div class="gtools">
+          <button data-z="in" title="Zoom in (+)">+</button>
+          <button data-z="out" title="Zoom out (−)">−</button>
+          <button data-z="fit" title="Fit (0)">⤢</button>
+          <button data-z="labels" title="All labels">Aa</button>
+        </div>
+        <div class="glegend" id="glegend"></div>
+        <div class="gtip" id="gtip" hidden></div>
+      </div>
+      <div class="vpane" id="v-files" hidden>
+        <div class="vhead"><span class="vt">FILES</span><input id="ffilter" placeholder="filter by path or title" spellcheck="false"><span class="vmeta" id="fmeta"></span></div>
+        <div class="tree" id="tree" tabindex="0"></div>
+      </div>
+      <div class="vpane" id="v-log" hidden>
+        <div class="vhead"><span class="vt">LOG</span><input id="lfilter" placeholder="filter subject, hash, or path" spellcheck="false"><span class="vmeta" id="lmeta"></span></div>
+        <div class="lchart" id="lchart"></div>
+        <div class="lchips" id="lchips"></div>
+        <div class="ltable" id="ltable" tabindex="0"></div>
+      </div>
+      <div class="vpane" id="v-table" hidden>
+        <div class="vhead"><span class="vt">TABLE</span><span class="tfold" id="tfold"></span><input id="tfilter" placeholder="filter: text, or key>3.5, key:value" spellcheck="false"><span class="vmeta" id="tmeta"></span><button class="mini" id="tcols">COLUMNS</button><button class="mini" id="tcsv">CSV</button></div>
+        <div class="tcolpick" id="tcolpick" hidden></div>
+        <div class="tgrid" id="tgrid" tabindex="0"></div>
+      </div>
+      <div class="vpane" id="v-list" hidden>
+        <div class="vhead"><span class="vt" id="listtitle">RESULTS</span><span class="vmeta" id="listmeta"></span></div>
+        <div class="list" id="list" tabindex="0"></div>
+      </div>
+    </section>
+    <div class="split" id="split" title="Drag to resize"></div>
+    <aside class="insp" id="insp">
+      <div class="ihead" id="ihead"></div>
+      <div class="itabs" id="itabs">
+        <button data-tab="overview"><kbd>O</kbd>OVERVIEW</button>
+        <button data-tab="content"><kbd>C</kbd>CONTENT</button>
+        <button data-tab="history"><kbd>H</kbd>HISTORY</button>
+      </div>
+      <div class="ibody" id="ibody"></div>
+    </aside>
+  </main>
+
+  <div class="ticker" id="ticker"><span class="tlabel">COMMITS</span><div class="tview"><div class="ttrack" id="ttrack"></div></div></div>
+  <footer class="status" id="status"></footer>
+</div>
+
+<div class="offbar" id="offbar" hidden><b>SERVER STOPPED</b> · this window reconnects when it's back (Raycast, or <code>okt --detach</code>)</div>
+<div class="offline" id="offline" hidden></div>
+<div class="toasts" id="toasts"></div>
+<div class="pop" id="settings" hidden></div>
+<div class="overlay" id="help" hidden></div>
+</body>
+</html>

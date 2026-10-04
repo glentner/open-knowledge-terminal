@@ -1,0 +1,32 @@
+[package]
+name = "okt-client"
+description = "The Open Knowledge Terminal browser client (Rust compiled to WebAssembly)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { version = "2", features = ["serde"] }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+js-sys = { workspace = true }
+console_error_panic_hook = { workspace = true }
+web-sys = { workspace = true, features = [
+  "Window", "Document", "Element", "HtmlElement", "HtmlInputElement", "HtmlCanvasElement", "HtmlFormElement",
+  "HtmlMetaElement", "HtmlIFrameElement", "HtmlCollection", "HtmlAnchorElement",
+  "CanvasRenderingContext2d", "Path2d", "CanvasGradient", "DomMatrix",
+  "Node", "NodeList", "DomTokenList", "CssStyleDeclaration", "DomRect", "DomRectReadOnly",
+  "Event", "EventTarget", "MouseEvent", "PointerEvent", "WheelEvent", "KeyboardEvent", "FocusEvent", "InputEvent",
+  "MessageEvent", "EventSource", "AddEventListenerOptions",
+  "Location", "History", "Storage", "Navigator", "Clipboard", "MediaQueryList",
+  "ResizeObserver", "ResizeObserverEntry", "Performance", "Headers", "Request", "RequestInit", "RequestCache", "Response",
+  "ServiceWorkerContainer", "Url", "UrlSearchParams", "Blob", "BlobPropertyBag",
+  "TreeWalker", "NodeFilter", "Text", "DocumentFragment", "ScrollIntoViewOptions", "ScrollLogicalPosition",
+  "ScrollBehavior", "CharacterData", "css", "SvgElement", "console",
+] }
