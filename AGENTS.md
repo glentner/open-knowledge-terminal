@@ -22,7 +22,8 @@ Parity (reference on 8376, okt on 6580, same KB; see README): `tests/parity/api_
 (JSON API), `tests/parity/raw_diff.py`, `tests/ui/dom_diff.mjs` (pane HTML across interactions),
 `tests/ui/shots.mjs` + `tests/ui/diff.py` (pixels), and against a scratch clone in watch mode
 `tests/parity/watch_diff.py` and `tests/ui/live_diff.mjs`. Run what covers your change; run all
-before a release. `tests/perf/profile.mjs` compares main-thread cost and frame pacing.
+before a release. `tests/perf/profile.mjs` compares main-thread cost and frame pacing;
+`tests/ui/soak.mjs` checks that memory and listeners plateau on a page left open.
 
 ## Map
 

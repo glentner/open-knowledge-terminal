@@ -50,7 +50,7 @@ Useful flags: `--theme terminal|dark|light`, `--accent '#ffa028'`, `--font "Berk
 | `okt-pygments/` | Syntax highlighting that reproduces Pygments' HTML output exactly (lexer tables exported from Pygments by `tools/pygments/export.py`, run by a Rust port of Pygments' lexer engine). |
 | `vendor/markdown-it/` | markdown-it 0.6.1 with one fix (emphasis source maps across stripped line prefixes); see `Cargo.toml` `[patch.crates-io]`. |
 | `tests/parity/` | API parity against a running reference server: every file, folder, commit, search, blame, raw file, and the watcher's events. |
-| `tests/ui/` | Browser parity: screenshots and pixel diffs, the HTML of every pane across ~60 interactions, live updates. |
+| `tests/ui/` | Browser parity: screenshots and pixel diffs, the HTML of every pane across ~60 interactions, live updates; a soak test for a page left open all day. |
 | `tests/perf/` | Main-thread cost and frame pacing of the same interactions in both clients. |
 
 ## Parity
