@@ -1,0 +1,74 @@
+[workspace]
+resolver = "2"
+members = ["okt-pygments", "okt-server", "okt-client"]
+default-members = ["okt-pygments", "okt-server"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Geoffrey Lentner <glentner@purdue.edu>"]
+license = "MIT"
+repository = "https://github.com/glentner/open-knowledge-terminal"
+
+[workspace.dependencies]
+okt-pygments = { path = "okt-pygments" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+# server
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "signal", "net", "fs"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query", "json"] }
+tower-http = { version = "0.7", features = ["compression-gzip"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+clap = { version = "4", features = ["derive"] }
+regex = "1"
+fancy-regex = "0.19"
+yaml-rust2 = "0.13"
+markdown-it = { version = "0.6.1", default-features = false }
+markdown-it-footnote = "0.2.0"
+markdown-it-front-matter = "0.3.0"
+markdown-it-deflist = "0.3.0"
+ammonia = "4"
+csv = "1"
+notify = "8"
+rust-embed = { version = "8", features = ["interpolate-folder-path"] }
+mime_guess = "2"
+flate2 = "1"
+sha1_smol = "1"
+percent-encoding = "2"
+html-escape = "0.2"
+idna = "1"
+libc = "0.2"
+
+# client
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = "0.3"
+console_error_panic_hook = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+
+# optimized, but with debug assertions on: rust-embed then serves okt-client/dist from disk, so a
+# client rebuild needs no server rebuild (development only)
+[profile.fast]
+inherits = "release"
+debug-assertions = true
+lto = false
+codegen-units = 16
+incremental = true
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+# markdown-it 0.6.1 with a source-map fix for emphasis spanning stripped line prefixes
+# (blockquotes, list items): upstream panics on overflow in debug and corrupts maps in release.
+[patch.crates-io]
+markdown-it = { path = "vendor/markdown-it" }

@@ -1,0 +1,7 @@
+/target/
+/okt-client/dist/
+/tests/node_modules
+/tests/package-lock.json
+__pycache__/
+*.pyc
+.DS_Store
