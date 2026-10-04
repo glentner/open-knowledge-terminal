@@ -4,7 +4,7 @@ members = ["okt-pygments", "okt-server", "okt-client"]
 default-members = ["okt-pygments", "okt-server"]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 authors = ["Geoffrey Lentner <glentner@purdue.edu>"]
 license = "MIT"
