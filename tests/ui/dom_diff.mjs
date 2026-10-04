@@ -91,6 +91,7 @@ const DEVIATIONS = {
 
 function norm(s, sel) {
   if (s == null) return s;
+  s = s.replace(/ class="nw"/g, '');  // okt marks short markdown table cells (README, Known differences)
   s = s.replace(/\b(index <b>)\d+(<\/b> ms · )\d\d:\d\d/g, '$1N$2HH:MM');
   s = s.replace(/<b>\d\d:\d\d:\d\d<\/b>/g, '<b>HH:MM:SS</b>');
   s = s.replace(/KB Terminal|Open Knowledge Terminal/g, 'APP');

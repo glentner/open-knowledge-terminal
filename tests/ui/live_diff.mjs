@@ -27,7 +27,8 @@ async function open(base) {
   return { page, errors };
 }
 const ref = await open(REF), okt = await open(OKT);
-const norm = s => (s || '').replace(/<b>\d\d:\d\d:\d\d<\/b>/g, '').replace(/index <b>\d+<\/b> ms · \d\d:\d\d/g, 'index').replace(/LIVE · 2s|LIVE/g, 'LIVE');
+// okt marks short markdown table cells with class "nw" (README, Known differences)
+const norm = s => (s || '').replace(/ class="nw"/g, '').replace(/<b>\d\d:\d\d:\d\d<\/b>/g, '').replace(/index <b>\d+<\/b> ms · \d\d:\d\d/g, 'index').replace(/LIVE · 2s|LIVE/g, 'LIVE');
 const SELS = ['#status', '#ibody', '#ttrack', '#tree', '#ihead'];
 async function compare(label) {
   const grab = p => p.evaluate(sels => sels.map(s => document.querySelector(s)?.innerHTML ?? null), SELS);
