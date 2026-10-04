@@ -298,6 +298,7 @@ pub fn render() {
         match res {
             Ok(html) => {
                 dom::set_html(&body, &html);
+                size_md_tables(&body);
                 body.set_scroll_top(0);
                 KEY.with(|k| *k.borrow_mut() = key);
                 if same {
@@ -1343,6 +1344,27 @@ fn data_table(t: &DataTable, sort: Option<(usize, i32)>) -> String {
         html.push_str(&format!("<div class=\"empty\">Showing the first {} rows. SOURCE has the rest up to the size limit.</div>", fmt_n(t.rows.len() as f64)));
     }
     html + "</div>"
+}
+
+/// Deviation from the reference: short markdown table cells stay on one line (`nw`): a single
+/// word, number or identifier of up to 24 characters, or any text of up to 12. A column of labels
+/// or numbers is then as wide as its widest value, and the long-text columns share the rest; a
+/// longer phrase may still wrap between words, so a tight table can narrow it instead of
+/// scrolling. In the reference `.md`'s `overflow-wrap: anywhere` lets every column shrink to one
+/// letter, and the longest column takes the whole width. Runs before any scrolling, since it
+/// changes the height of the page.
+fn size_md_tables(root: &Element) {
+    for cell in dom::qa_in(root, "article.md table th, article.md table td") {
+        if short_cell(&dom::text(&cell)) {
+            dom::add_class(&cell, "nw");
+        }
+    }
+}
+
+fn short_cell(text: &str) -> bool {
+    let t = text.trim();
+    let n = t.chars().count();
+    n <= 12 || (n <= 24 && !t.contains(char::is_whitespace))
 }
 
 /// `mdBlock(p, path)`

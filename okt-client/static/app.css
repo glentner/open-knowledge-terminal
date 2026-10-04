@@ -439,6 +439,16 @@ a { color: inherit; }
 .md table { border-collapse: collapse; font-size: .92em; display: block; overflow-x: auto; max-width: 100%; }
 .md th, .md td { border: 1px solid var(--line-2); padding: 3px 9px; vertical-align: top; }
 .md th { background: var(--bg-3); color: var(--accent-text); font-weight: 600; text-align: left; }
+/* okt (README, Known differences): table columns are as narrow as their longest word, not one
+   letter (prose keeps `overflow-wrap: anywhere`), except that links may still break anywhere;
+   cells the client marks short (.nw) stay on one line; and a wide table may run past the prose
+   measure to the edge of the pane. */
+#ibody { container-type: inline-size; }
+.md th, .md td { overflow-wrap: break-word; }
+.md th a, .md td a { overflow-wrap: anywhere; }
+.md th.nw, .md td.nw { white-space: nowrap; }
+.md > table { width: max-content; max-width: calc(100cqw - 36px); }
+.md.blame > table { max-width: calc(100cqw - 52px); }
 .md img { max-width: 100%; }
 .md .hc { color: var(--faint); font-family: var(--mono); font-size: .85em; }
 .md input[type=checkbox] { accent-color: var(--accent); margin-right: 6px; }
