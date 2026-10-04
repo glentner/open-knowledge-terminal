@@ -1,0 +1,43 @@
+[package]
+name = "okt-server"
+description = "The Open Knowledge Terminal: a live, read-only browser terminal for a markdown knowledge base kept in git"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "okt"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }
+futures-util = { workspace = true }
+clap = { workspace = true }
+regex = { workspace = true }
+fancy-regex = { workspace = true }
+yaml-rust2 = { workspace = true }
+markdown-it = { workspace = true }
+markdown-it-footnote = { workspace = true }
+markdown-it-front-matter = { workspace = true }
+markdown-it-deflist = { workspace = true }
+ammonia = { workspace = true }
+okt-pygments = { workspace = true }
+csv = { workspace = true }
+notify = { workspace = true }
+rust-embed = { workspace = true }
+mime_guess = { workspace = true }
+flate2 = { workspace = true }
+sha1_smol = { workspace = true }
+percent-encoding = { workspace = true }
+idna = { workspace = true }
+libc = { workspace = true }
+indexmap = "2"
+sha2 = "0.10"
+base64 = "0.22"
+mdurl = "0.3"
+once_cell = "1"
