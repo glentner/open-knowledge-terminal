@@ -3,7 +3,6 @@
 #   make            build the client (WebAssembly) and the server that embeds it
 #   make install    put the `okt` binary in $(PREFIX)/bin
 #   make test       unit tests
-#   make parity     compare the JSON API with a running reference server (see tests/parity)
 #
 # Needs: rustup's wasm32-unknown-unknown target and wasm-bindgen-cli at the version in
 # Cargo.lock (`cargo install wasm-bindgen-cli --version <x.y.z>`). The WCARGO / WFLAGS /
@@ -20,7 +19,7 @@ BINDGEN_VERSION := $(shell awk '/^name = "wasm-bindgen"$$/{getline; gsub(/versio
 DIST            := okt-client/dist
 WASM            := $(WASM_TARGET_DIR)/wasm32-unknown-unknown/wasm-release/okt_client.wasm
 
-.PHONY: all client server install test parity clean
+.PHONY: all client server install test clean
 
 all: server
 
@@ -41,9 +40,6 @@ install: server
 
 test:
 	$(CARGO) test -p okt-server -p okt-pygments -p okt-client
-
-parity:
-	python3 tests/parity/api_diff.py
 
 clean:
 	$(CARGO) clean
