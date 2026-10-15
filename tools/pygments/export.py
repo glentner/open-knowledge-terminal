@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Export Pygments lexer data for the `okt-pygments` crate.
 
-Run with the Pygments and the Python minor version the reference runs on (Python's own
+Run with the Pygments and the Python minor version okt-pygments matches (Python's own
 Unicode tables decide what ``\\w``, ``\\d`` and ``\\s`` match)::
 
     uv run --python 3.13 --with pygments==2.21.0 python tools/pygments/export.py \\

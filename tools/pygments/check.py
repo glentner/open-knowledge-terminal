@@ -8,7 +8,9 @@ Run with a Python that has the reference's dependencies, after building the CLI:
         --with linkify-it-py --with pyyaml --with nh3 python tools/pygments/check.py \\
         [--kb] [--examples DIR] [--snippets DIR] [--synthetic] [--hl PATH] [-v]
 
-The reference is $OKT_KB/bin/terminal.py (OKT_KB defaults to ~/KB).
+The reference is the last bin/terminal.py in the KB's history: $OKT_REF_REV of the git repo at
+$OKT_KB (defaults: c49bce5~1, the parent of the commit that retired it on 2026-10-14, and ~/KB).
+It stands in for Pygments plus the HTML wrapping okt reproduces; this is a check, not a gate.
 
 Corpora:
   --kb          every file of the KB git repo that the reference highlights (its own `classify`
@@ -44,14 +46,20 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 OKT = os.path.dirname(os.path.dirname(HERE))
 KB = os.environ.get('OKT_KB', os.path.expanduser('~/KB'))
-TERMINAL = os.path.join(KB, 'bin', 'terminal.py')
+REF_REV = os.environ.get('OKT_REF_REV', 'c49bce5dbef57f419dc867b700233d23f3d61105~1')
 DEFAULT_HL = os.path.join(OKT, 'target', 'release', 'examples', 'hl')
 
 
 def load_reference():
-    spec = importlib.util.spec_from_file_location('terminal', TERMINAL)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    src = subprocess.run(['git', '-C', KB, 'show', f'{REF_REV}:bin/terminal.py'],
+                         capture_output=True, check=True).stdout
+    with tempfile.TemporaryDirectory(prefix='okt-ref-') as tmp:
+        path = os.path.join(tmp, 'terminal.py')
+        with open(path, 'wb') as fh:
+            fh.write(src)
+        spec = importlib.util.spec_from_file_location('terminal', path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
     return mod
 
 
