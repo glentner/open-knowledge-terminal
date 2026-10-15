@@ -1,7 +1,6 @@
 # Open Knowledge Terminal: agent notes
 
-`okt` is the KB's terminal, rebuilt in Rust from `bin/terminal.py` (the reference). The reference
-retired from the KB on 2026-10-14, and okt is now its own specification. Read `README.md` first.
+`okt` is the KB's terminal, written in Rust; it is its own specification. Read `README.md` first.
 
 ## Build and test
 
@@ -13,9 +12,9 @@ cargo test -p okt-server -p okt-pygments -p okt-client
 ```
 
 Browser suites run against a server, normally the throwaway one (`tests/env.sh`, § Factory):
-`tests/ui/keys.mjs` covers the keys okt adds; `tests/ui/soak.mjs` checks that memory and listeners
-plateau on a page left open; `tests/perf/profile.mjs` measures main-thread cost and frame pacing,
-and `tests/perf/compare.py` compares two runs. They need Playwright (`npm install` in `tests/`).
+`tests/ui/keys.mjs` covers the navigation keys (README § Keys); `tests/ui/soak.mjs` checks that
+memory and listeners plateau on a page left open; `tests/perf/profile.mjs` measures main-thread
+cost and frame pacing, and `tests/perf/compare.py` compares two runs. They need Playwright (`npm install` in `tests/`).
 
 ## Map
 
@@ -23,11 +22,11 @@ and `tests/perf/compare.py` compares two runs. They need Playwright (`npm instal
   `parse.rs` (one file), `yaml.rs` (PyYAML-compatible loading), `git.rs`, `render/` (markdown,
   linkify, punycode, highlighting via okt-pygments), `http.rs` (routes, CSP, gzip), `watch.rs`,
   `pwa.rs`, `launch.rs` (editor/open/reveal), `main.rs` (CLI, detach/stop).
-- `okt-client/src`: one module per section of the reference's APP_JS (`graph`, `views/*`,
+- `okt-client/src`: one module per pane or concern (`graph`, `views/*`,
   `insp`, `go`, `chrome`, `live`, `nav`, `keys`, `actions`); `js.rs` holds the JavaScript
   semantics the output depends on (number formatting, `toFixed`, `localeCompare`, object key
   order, UTF-16 lengths); `state.rs` holds `S`, settings (localStorage `okt:<kb>`) and the boot data.
-- `okt-client/static`: the page, `app.css` (the reference stylesheet; the graph rules in it are
+- `okt-client/static`: the page, `app.css` (the stylesheet; the graph rules in it are
   the spec `graph.rs` paints from, so change both together), `main.js` (loader).
 - `okt-pygments`: the highlighter; its `data/pygments.json` is generated (§ Invariants 2).
 

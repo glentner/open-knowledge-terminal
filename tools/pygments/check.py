@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
-"""Compare okt-pygments with the reference `highlight_lines` (terminal.py, Pygments 2.21.0).
+"""Compare okt-pygments with Pygments 2.21.0 itself.
 
-Run with a Python that has the reference's dependencies, after building the CLI::
+Run with Pygments 2.21.0, after building the CLI::
 
     cargo build --release -p okt-pygments --example hl
-    uv run --python 3.13 --with pygments==2.21.0 --with markdown-it-py --with mdit-py-plugins \\
-        --with linkify-it-py --with pyyaml --with nh3 python tools/pygments/check.py \\
+    uv run --python 3.13 --with pygments==2.21.0 python tools/pygments/check.py \\
         [--kb] [--examples DIR] [--snippets DIR] [--synthetic] [--hl PATH] [-v]
 
-The reference is the last bin/terminal.py in the KB's history: $OKT_REF_REV of the git repo at
-$OKT_KB (defaults: c49bce5~1, the parent of the commit that retired it on 2026-10-14, and ~/KB).
-It stands in for Pygments plus the HTML wrapping okt reproduces; this is a check, not a gate.
+The expected output is `highlight_lines` below: Pygments' `HtmlFormatter(nowrap=True)` split into
+lines, with okt's lexer selection. This is a check, not a gate.
 
 Corpora:
-  --kb          every file of the KB git repo that the reference highlights (its own `classify`
-                and the rule in its file view: code/html kinds, plus .json/.jsonl/.geojson/.yaml/
-                .yml/.toml text; .jsonl with lang='json')
+  --kb          every file of the KB git repo at $OKT_KB (default ~/KB) that okt highlights
+                (code and html files, plus .json/.jsonl/.geojson/.yaml/.yml/.toml text; .jsonl
+                with lang='json')
   --examples    Pygments' tests/examplefiles/<alias>/* (lang=<alias>) for supported lexers
   --snippets    Pygments' tests/snippets/<alias>/*.txt input sections (lang=<alias>)
   --synthetic   edge cases: CRLF, CR, BOM, tabs, empty files, no trailing newline, unmatched
@@ -34,7 +32,7 @@ Prints per-lexer pass counts and, for each failure, the first differing line.
 
 import argparse
 import collections
-import importlib.util
+import html
 import json
 import os
 import subprocess
@@ -43,30 +41,95 @@ import signal
 import tempfile
 import time
 
+from pygments import highlight
+from pygments.formatters import HtmlFormatter
+from pygments.lexers import get_lexer_by_name, get_lexer_for_filename
+from pygments.util import ClassNotFound
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 OKT = os.path.dirname(os.path.dirname(HERE))
 KB = os.environ.get('OKT_KB', os.path.expanduser('~/KB'))
-REF_REV = os.environ.get('OKT_REF_REV', 'c49bce5dbef57f419dc867b700233d23f3d61105~1')
 DEFAULT_HL = os.path.join(OKT, 'target', 'release', 'examples', 'hl')
 
+MAX_RENDER_BYTES = 2 * 1024 * 1024      # larger text files are shown truncated
 
-def load_reference():
-    src = subprocess.run(['git', '-C', KB, 'show', f'{REF_REV}:bin/terminal.py'],
-                         capture_output=True, check=True).stdout
-    with tempfile.TemporaryDirectory(prefix='okt-ref-') as tmp:
-        path = os.path.join(tmp, 'terminal.py')
-        with open(path, 'wb') as fh:
-            fh.write(src)
-        spec = importlib.util.spec_from_file_location('terminal', path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-    return mod
+# Which files okt highlights: `classify` in okt-server/src/parse.rs and the rule in render/mod.rs.
+CODE_EXT = {
+    '.py', '.pyi', '.sh', '.bash', '.zsh', '.fish', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx',
+    '.css', '.scss', '.sql', '.go', '.rs', '.rb', '.java', '.kt', '.c', '.h', '.cc', '.cpp', '.hpp',
+    '.swift', '.r', '.jl', '.lua', '.pl', '.php', '.ps1', '.html', '.htm', '.xml', '.svg', '.vue',
+    '.svelte', '.awk', '.mk',
+}
+CODE_NAMES = {'Makefile', 'Dockerfile', 'Justfile', 'Rakefile'}
+TEXT_EXT = {
+    '.txt', '.text', '.csv', '.tsv', '.json', '.jsonl', '.yaml', '.yml', '.toml', '.ini', '.cfg',
+    '.conf', '.log', '.env', '.gitignore', '.gitkeep', '.gitattributes', '.rst', '.tex', '.bib',
+    '.ics', '.vtt', '.srt',
+}
+STRUCTURED_EXT = {'.json', '.jsonl', '.geojson', '.yaml', '.yml', '.toml'}   # text, but highlighted
+HTML_EXT = {'.html', '.htm'}
+NOT_TEXT_EXT = {
+    '.md', '.markdown', '.mdown', '.mkd', '.pdf',
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.bmp', '.ico', '.svg',
+    '.mp3', '.wav', '.ogg', '.m4a', '.flac', '.mp4', '.webm', '.mov', '.m4v',
+}
 
 
-T = load_reference()
+def ext_of(path):
+    name = path.rsplit('/', 1)[-1]
+    if name.startswith('.') and name.count('.') == 1:
+        return name.lower()  # .gitignore, .env
+    return ('.' + name.rsplit('.', 1)[-1].lower()) if '.' in name else ''
 
-from pygments.lexers import get_lexer_by_name, get_lexer_for_filename  # noqa: E402
-from pygments.util import ClassNotFound  # noqa: E402
+
+def is_highlighted(path, head):
+    """Whether okt's file view highlights this file (code and html, plus structured text)."""
+    e = ext_of(path)
+    if e in HTML_EXT:
+        return True
+    if e in NOT_TEXT_EXT or b'\0' in head[:8192]:
+        return False
+    if e in CODE_EXT or path.rsplit('/', 1)[-1] in CODE_NAMES or head.startswith(b'#!'):
+        return True
+    if e not in STRUCTURED_EXT:
+        return False
+    if e in TEXT_EXT:
+        return True
+    try:
+        head[:4096].decode('utf-8')
+        return True
+    except UnicodeDecodeError:
+        return False
+
+
+SHEBANGS = (('python', 'python'), ('node', 'javascript'), ('bash', 'bash'), ('/sh', 'bash'),
+            ('zsh', 'bash'), ('ruby', 'ruby'), ('perl', 'perl'), ('awk', 'awk'))
+
+
+def highlight_lines(text, path=None, lang=None):
+    """Highlight to a list of per-line HTML strings: the output okt-pygments must match."""
+    lexer = None
+    try:
+        if lang:
+            lexer = get_lexer_by_name(lang, stripnl=False, ensurenl=False)
+        elif path:
+            name = path.rsplit('/', 1)[-1]
+            try:
+                lexer = get_lexer_for_filename(name, stripnl=False, ensurenl=False)
+            except ClassNotFound:
+                first = text.split('\n', 1)[0]
+                if first.startswith('#!'):
+                    for key, lx in SHEBANGS:
+                        if key in first:
+                            lexer = get_lexer_by_name(lx, stripnl=False, ensurenl=False)
+                            break
+    except ClassNotFound:
+        lexer = None
+    if lexer is None:
+        return [html.escape(line) for line in text.split('\n')]
+    lines = highlight(text, lexer, HtmlFormatter(nowrap=True)).split('\n')
+    n = text.count('\n') + 1
+    return lines[:n] if len(lines) > n else lines
 
 
 def supported():
@@ -75,7 +138,7 @@ def supported():
 
 
 def lexer_class(text, path, lang):
-    """Which lexer the reference picks (mirrors highlight_lines)."""
+    """Which lexer highlight_lines picks."""
     try:
         if lang:
             return type(get_lexer_by_name(lang)).__name__
@@ -85,9 +148,7 @@ def lexer_class(text, path, lang):
         except ClassNotFound:
             first = text.split('\n', 1)[0]
             if first.startswith('#!'):
-                for key, lx in (('python', 'python'), ('node', 'javascript'), ('bash', 'bash'),
-                                ('/sh', 'bash'), ('zsh', 'bash'), ('ruby', 'ruby'), ('perl', 'perl'),
-                                ('awk', 'awk')):
+                for key, lx in SHEBANGS:
                     if key in first:
                         return type(get_lexer_by_name(lx)).__name__
     except ClassNotFound:
@@ -95,7 +156,7 @@ def lexer_class(text, path, lang):
     return '(none)'
 
 
-class RefTimeout(Exception):
+class PygmentsTimeout(Exception):
     pass
 
 
@@ -105,8 +166,8 @@ class Case:
     def __init__(self, corpus, file, path, lang):
         self.corpus, self.file, self.path, self.lang = corpus, file, path, lang
         with open(file, 'rb') as fh:
-            data = fh.read(T.MAX_RENDER_BYTES + 1)
-        self.text = data[:T.MAX_RENDER_BYTES].decode('utf-8', 'replace')
+            data = fh.read(MAX_RENDER_BYTES + 1)
+        self.text = data[:MAX_RENDER_BYTES].decode('utf-8', 'replace')
 
 
 def kb_cases():
@@ -120,10 +181,8 @@ def kb_cases():
             continue
         with open(full, 'rb') as fh:
             head = fh.read(8192)
-        kind = T.classify(rel, head, False)
-        ext = T.ext_of(rel)
-        if kind in ('code', 'html') or (kind == 'text' and ext in T.STRUCTURED_EXT):
-            out.append(Case('kb', full, rel, 'json' if ext == '.jsonl' else None))
+        if is_highlighted(rel, head):
+            out.append(Case('kb', full, rel, 'json' if ext_of(rel) == '.jsonl' else None))
     return out
 
 
@@ -228,7 +287,7 @@ def synthetic_cases(tmp):
             fh.write(content)
         lang = 'json' if name.endswith('.jsonl') else None
         out.append(Case('synthetic', p, name, lang))
-    # invalid UTF-8 (decoded with 'replace' by the reference)
+    # invalid UTF-8 (decoded with 'replace', as okt does)
     p = os.path.join(d, 'invalid.py')
     with open(p, 'wb') as fh:
         fh.write(b'x = "\xff\xfe\xc3("\n# \xe2\x82\n')
@@ -419,7 +478,7 @@ def run_rust(hl, cases):
         lines = []
         for c in cases:
             src = c.file
-            if os.path.getsize(src) > T.MAX_RENDER_BYTES:
+            if os.path.getsize(src) > MAX_RENDER_BYTES:
                 src = os.path.join(tmp, str(len(lines)))
                 with open(src, 'wb') as fh:
                     fh.write(c.text.encode('utf-8'))
@@ -456,7 +515,7 @@ def main():
     ap.add_argument('-v', '--verbose', action='store_true')
     ap.add_argument('--only', help='only lexers with this class name (comma separated)')
     ap.add_argument('--timeout', type=int, default=20,
-                    help='seconds before giving up on the reference for one case')
+                    help='seconds before giving up on Pygments for one case')
     args = ap.parse_args()
     sup = supported()
     if args.selection:
@@ -500,7 +559,7 @@ def compare_all(args, sup, cases):
     refused = []
 
     def on_alarm(_sig, _frame):
-        raise RefTimeout()
+        raise PygmentsTimeout()
 
     signal.signal(signal.SIGALRM, on_alarm)
     t0 = time.time()
@@ -520,12 +579,12 @@ def compare_all(args, sup, cases):
         key = (c.corpus, cls)
         signal.alarm(args.timeout)
         try:
-            want = T.highlight_lines(c.text, c.path, c.lang)
-        except RefTimeout:
-            stats[key]['ref timeout'] += 1
+            want = highlight_lines(c.text, c.path, c.lang)
+        except PygmentsTimeout:
+            stats[key]['pygments timeout'] += 1
             timeouts.append((c, cls, isinstance(got, dict)))
             continue
-        except Exception as e:  # the reference itself fails
+        except Exception as e:  # Pygments itself fails
             want = None
             err = f'{type(e).__name__}: {e}'
         finally:
@@ -543,7 +602,7 @@ def compare_all(args, sup, cases):
             continue
         if want is None:
             stats[key]['FAIL'] += 1
-            failures.append((c, cls, f'reference raised {err}', None))
+            failures.append((c, cls, f'Pygments raised {err}', None))
             continue
         if got == want:
             stats[key]['ok'] += 1
@@ -557,13 +616,13 @@ def compare_all(args, sup, cases):
     for (corpus, cls), cnt in sorted(stats.items()):
         print(f'{corpus:10} {cls:28} {cnt["ok"] + cnt["ok (both fail)"]:6} {cnt["FAIL"]:6} '
               f'{cnt["unsupported"]:6} {cnt["refused"]:7}'
-              + (f'  ({cnt["ref timeout"]} ref timeouts)' if cnt['ref timeout'] else ''))
+              + (f'  ({cnt["pygments timeout"]} timeouts)' if cnt['pygments timeout'] else ''))
         by_corpus[corpus].update(cnt)
     print()
     for corpus, cnt in by_corpus.items():
         ok = cnt['ok'] + cnt['ok (both fail)']
         total = sum(cnt.values())
-        sup_total = total - cnt['unsupported'] - cnt['ref timeout'] - cnt['refused']
+        sup_total = total - cnt['unsupported'] - cnt['pygments timeout'] - cnt['refused']
         print(f'{corpus}: {ok}/{sup_total} identical ({cnt["unsupported"]} unsupported-lexer files skipped, '
               f'{cnt["refused"]} refused)')
     if refused:
@@ -571,7 +630,7 @@ def compare_all(args, sup, cases):
         for c, cls in refused:
             print(f'  [{c.corpus}] {cls} {c.file} (lang={c.lang})')
     if timeouts:
-        print(f'\n{len(timeouts)} cases where the reference did not finish within {args.timeout}s:')
+        print(f'\n{len(timeouts)} cases where Pygments did not finish within {args.timeout}s:')
         for c, cls, gave_up in timeouts:
             what = 'gave up' if gave_up else 'produced output'
             print(f'  [{c.corpus}] {cls} {c.file} (lang={c.lang}); rust {what}')

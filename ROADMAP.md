@@ -1,7 +1,6 @@
 # Open Knowledge Terminal — Roadmap
 
-`okt` is the KB's terminal, rebuilt in Rust from `bin/terminal.py`, which retired from the KB on
-2026-10-14. This document records the work still intended.
+`okt` is the KB's terminal, written in Rust. This document records the work still intended.
 
 It is a **forward-looking index, not an implementation plan.** Each entry states a problem and the
 intention behind solving it; the *how* belongs to the plan step of a factory cycle. As-built
@@ -24,11 +23,11 @@ Those are listed under *Settled questions* below rather than as cycles.
 
 # Part I — Tests
 
-### 1. Regression tests for what the parity suites covered
+### 1. End-to-end regression tests
 
-The parity suites retired with the reference. Nothing now checks `/api/index`, `/api/file`,
-`/raw/`, the watcher or the rendered panes end to end, so a regression there reaches the installed
-okt unseen. Rebuild that coverage against okt's own recorded output.
+Nothing checks `/api/index`, `/api/file`, `/raw/`, the watcher or the rendered panes end to end, so
+a regression there reaches the installed okt unseen. Build that coverage against okt's own recorded
+output.
 
 **Seed:** [`issues/regression-suite.md`](issues/regression-suite.md)
 
@@ -36,6 +35,4 @@ okt unseen. Rebuild that coverage against okt's own recorded output.
 
 ## Settled questions
 
-- **A code fence in a tight list item renders with an extra newline** (`declined`, 2026-10-15). It
-  was a defect only against the reference; the newline doesn't render.
-  [`issues/tight-list-fence-newline.md`](issues/tight-list-fence-newline.md)
+None yet.

@@ -313,7 +313,7 @@ mod tests {
                 "mailto:glentner@purdue.edu".into()
             )]
         );
-        assert_eq!(urls("bin/terminal.py"), vec![]);
+        assert_eq!(urls("bin/server.py"), vec![]);
         assert_eq!(
             urls("go https://example.org/a?b=1."),
             vec![(

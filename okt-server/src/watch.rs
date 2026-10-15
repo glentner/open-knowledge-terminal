@@ -1,6 +1,6 @@
 //! Watching the KB: file-system events (FSEvents on macOS, inotify on Linux), debounced, trigger
 //! an incremental re-index; a slow safety poll catches anything the events miss. Where events are
-//! unavailable it falls back to polling every `--interval` seconds, like the reference watcher.
+//! unavailable it falls back to polling every `--interval` seconds.
 
 use std::path::Path;
 use std::sync::Arc;

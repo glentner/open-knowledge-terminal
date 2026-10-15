@@ -1,4 +1,4 @@
-//! The reference client's formatting helpers (dates in local time, sizes, ages).
+//! The client's formatting helpers (dates in local time, sizes, ages).
 
 use crate::js::{self, num, pad2, to_fixed};
 

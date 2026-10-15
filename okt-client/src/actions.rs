@@ -1,4 +1,4 @@
-//! Actions the reference exposes as commands and buttons: open with an app, rebuild, time
+//! Actions exposed as commands and buttons: open with an app, rebuild, time
 //! travel, copy, blame, accent, expand/collapse.
 
 use serde_json::json;
@@ -47,7 +47,7 @@ pub fn open_with(how: &str, path: Option<&str>) {
     });
 }
 
-/// m (okt only): pin the selection, or unpin it. Up to nine pins, kept with the settings.
+/// m: pin the selection, or unpin it. Up to nine pins, kept with the settings.
 pub fn pin_toggle() {
     let Some(sel) = state::sel() else {
         toast("PIN", "Select something to pin", true);
@@ -74,7 +74,7 @@ pub fn pin_toggle() {
     toast("PIN", &msg, err);
 }
 
-/// 1-9 (okt only): go to that pin.
+/// 1-9: go to that pin.
 pub fn pin_jump(n: usize) {
     let pin = state::cfg().pins.get(n.wrapping_sub(1)).cloned();
     let Some(p) = pin else {

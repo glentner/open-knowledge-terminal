@@ -164,7 +164,7 @@ pub fn wire() {
     });
 }
 
-/// n and N (okt only): the next or previous FIND match. Within the open file they move between
+/// n and N: the next or previous FIND match. Within the open file they move between
 /// the highlighted matches; past the last (before the first) they open the next (previous) file
 /// in the results at its first (last) matching line, wrapping around the list.
 pub fn find_step(dir: i64) {

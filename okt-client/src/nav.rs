@@ -266,7 +266,7 @@ pub fn render_crumbs() {
         );
         return;
     }
-    // (the reference strips one trailing slash: `replace(/\/$/, '')`)
+    // (one trailing slash is stripped: `replace(/\/$/, '')`)
     let parts: Vec<String> = if sel == "." {
         vec![]
     } else {

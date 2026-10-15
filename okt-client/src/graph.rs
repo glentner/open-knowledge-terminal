@@ -1,8 +1,7 @@
-//! The knowledge graph: the reference's deterministic radial layout by folder, drawn on a canvas.
+//! The knowledge graph: a deterministic radial layout by folder, drawn on a canvas.
 //!
-//! The reference drew an SVG and restyled ~500 elements through CSS on every selection change and
-//! scale change, which is what stuttered. Here the layout and label placement are the same code,
-//! and the picture is painted from a resolved copy of the graph's CSS rules (`.n`, `.lab`,
+//! An SVG restyled through CSS on every selection and scale change stutters at ~500 elements, so
+//! the picture is painted from a resolved copy of the graph's CSS rules (`.n`, `.lab`,
 //! `.halo`, `.ebase`, `.ehot`, `.spotlit`, ...), once per animation frame and only when something
 //! changed. Input handlers never read layout; they update the view and schedule a frame.
 
@@ -442,7 +441,7 @@ fn label_geom(phi: f64, d: f64) -> LabelGeom {
     }
 }
 
-/// `shapePath(shape, r)`: SVG path data (the same strings the reference drew, so the same shapes).
+/// `shapePath(shape, r)`: SVG path data (the shapes the legend draws).
 pub fn shape_path(shape: &str, r: f64) -> String {
     match shape {
         "square" | "hsquare" => format!(
@@ -544,7 +543,7 @@ struct VNode {
     dot: Option<(f64, f64)>,
     label: String,
     lg: LabelGeom,
-    /// the label offset before rounding (what the reference's `G.lab` held, for declutter)
+    /// the label offset before rounding (for declutter)
     lg_raw: (f64, f64),
     fs: f64,
     // label segment data for declutter
@@ -652,7 +651,7 @@ pub struct G {
     decl_t: f64,
     decl_timer: i32,
     hover: Option<usize>,
-    /// the node the keyboard walk is on (okt only; see `walk`)
+    /// the node the keyboard walk is on (see `walk`)
     cursor: Option<usize>,
     flash: Vec<(usize, f64)>,
     w: f64,
@@ -1272,7 +1271,7 @@ pub fn declutter() {
     for (pr, _, i) in items {
         let n = &gs.nodes[i];
         let p = &lay.pos[&n.id];
-        // the reference measured from the layout position plus the label offset (unrounded)
+        // measured from the layout position plus the label offset (unrounded)
         let (ox, oy) = n.lg_raw;
         let (ax, ay) = ((p.x + ox) * sk, (p.y + oy) * sk);
         let len = n.len * n.fs * CW;
@@ -1527,8 +1526,8 @@ fn draw(now: f64) {
     dash(ctx, &[]);
     ctx.set_global_alpha(1.0);
     // nodes, each with its label, in document order (later nodes paint over earlier labels).
-    // Under the spotlight the other nodes are dimmed with *group* opacity in the reference (the
-    // node's shape, outline and label composited together), so each dim level is painted at full
+    // Under the spotlight the other nodes are dimmed with *group* opacity (the node's shape,
+    // outline and label composited together), so each dim level is painted at full
     // strength into its own layer and the layer is composited at that opacity, under the lit nodes.
     // labels keep a constant screen size (`scale(var(--ls))`, --ls = clamp(1/sk, .08, 6)); exactly
     // 1 inside the clamp, so the text keeps one transform and its glyphs stay cached while zooming
@@ -1676,9 +1675,7 @@ impl Painter {
                 let e = ease_out((dt % 1600.0) / 1600.0);
                 (1.0 - e, 6.0 - 5.0 * e)
             }
-            // Deviation from the reference: when the flash ends the ring is back. There
-            // `.n.flash .halo { opacity: 0 }` outlasts the animation and beats `.n.sel .halo`, so
-            // a flashed node shows no selection ring until the graph is rebuilt.
+            // when the flash ends the selection ring is back
             _ => (if is_sel { 1.0 } else { 0.0 }, 2.0),
         };
         if halo_op > 0.0 {
@@ -1689,7 +1686,7 @@ impl Painter {
             ctx.set_line_width(halo_w);
             ctx.stroke();
         }
-        // the keyboard walk's place: a dashed ring, as the reference draws a search hit
+        // the keyboard walk's place: a dashed ring, as a search hit is drawn
         if gs.cursor == Some(i) {
             ctx.set_global_alpha(0.9);
             ctx.begin_path();
@@ -1708,9 +1705,8 @@ impl Painter {
         };
         ctx.set_fill_style_str(fill);
         ctx.fill_with_path_2d(&n.shape);
-        // Deviation from the reference: hollow shapes are outlined in their family color, as the
-        // legend draws them. There `.n .shape { stroke: var(--graph-bg) }` overrides the stroke
-        // attribute, so records and external systems paint as background.
+        // hollow shapes (records, external systems) are outlined in their family color, as the
+        // legend draws them
         ctx.set_stroke_style_str(if n.hollow { c.fam(&n.fam) } else { &c.bg });
         ctx.set_line_width(n.sw);
         ctx.stroke_with_path(&n.shape);
@@ -1828,7 +1824,7 @@ fn set_dash(ctx: &CanvasRenderingContext2d, d: &[f64]) {
     ctx.set_line_dash(&arr).ok();
 }
 
-// ---- keyboard: walking connections, framing the selection (okt only) --------------------------
+// ---- keyboard: walking connections, framing the selection ------------------------------------
 
 struct Walk {
     from: String,

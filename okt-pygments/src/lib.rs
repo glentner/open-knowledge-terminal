@@ -1,7 +1,7 @@
 //! Pygments-compatible syntax highlighting.
 //!
-//! [`highlight_lines`] reproduces, byte for byte, this function of the Python reference
-//! (`terminal.py`), which uses Pygments 2.21.0:
+//! [`highlight_lines`] reproduces, byte for byte, this Python function over Pygments 2.21.0
+//! (`tools/pygments/check.py` holds it as the expected output):
 //!
 //! ```python
 //! def highlight_lines(text, path=None, lang=None):
@@ -31,7 +31,7 @@
 //!
 //! Lexers Pygments would select but that are not exported/ported give
 //! [`Highlight::Unsupported`], so the caller can fall back to another highlighter instead of
-//! showing output that differs from the reference.
+//! showing output that differs from Pygments'.
 
 mod data;
 mod engine;
@@ -50,7 +50,7 @@ use engine::{Inst, Runner};
 /// Result of [`highlight_lines`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Highlight {
-    /// Exactly what the reference returns, including its `html.escape` fallback (one escaped
+    /// Exactly what the Python function returns, including its `html.escape` fallback (one escaped
     /// line per `\n`-separated line) when no lexer applies.
     Lines(Vec<String>),
     /// Pygments would pick this lexer (class name, e.g. `"CSharpLexer"`), but it isn't
@@ -59,7 +59,7 @@ pub enum Highlight {
     Unsupported { lexer: String },
 }
 
-/// Highlight `text` to per-line HTML, like the reference's `highlight_lines(text, path, lang)`.
+/// Highlight `text` to per-line HTML, like the Python `highlight_lines(text, path, lang)`.
 ///
 /// `lang` (a Pygments alias) takes precedence; otherwise the lexer is chosen from the file
 /// name in `path` (only the part after the last `/` matters), falling back to the `#!` line.
@@ -98,7 +98,7 @@ pub fn select_lexer(text: &str, path: Option<&str>, lang: Option<&str>) -> Optio
     select(&DATA, text, path, lang).map(|e| e.class.as_str())
 }
 
-/// The lexer choice of the reference: `get_lexer_by_name(lang)` if `lang`, else
+/// The lexer choice: `get_lexer_by_name(lang)` if `lang`, else
 /// `get_lexer_for_filename(basename)`, else the `#!` guess; `None` when all fail.
 fn select<'d>(
     data: &'d data::Data,

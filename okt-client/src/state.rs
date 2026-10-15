@@ -1,6 +1,6 @@
 //! Global state: the boot data the server put in the page, the per-browser settings (in
-//! localStorage), and `S`, the client state of the reference. Everything lives on the one UI
-//! thread; borrows are kept short and never held across calls that may re-enter (focus, blur).
+//! localStorage), and `S`, the client state. Everything lives on the one UI thread; borrows are
+//! kept short and never held across calls that may re-enter (focus, blur).
 
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
@@ -88,7 +88,7 @@ pub struct Settings {
     pub tree_open: IndexMap<String, bool>,
     pub table_cols: Option<IndexMap<String, Vec<String>>>,
     pub badge: Option<bool>,
-    /// okt only: up to nine pinned ids, for the keys 1-9 (m pins and unpins)
+    /// up to nine pinned ids, for the keys 1-9 (m pins and unpins)
     pub pins: Vec<String>,
     extra: Map<String, Value>,
 }
@@ -305,7 +305,7 @@ pub struct State {
     pub mode: String,
     pub blame: bool,
     pub jump: Option<i64>,
-    /// okt only: after n/N opens a file at a FIND match, mark the first (1) or last (-1) match
+    /// after n/N opens a file at a FIND match, mark the first (1) or last (-1) match
     /// on the jumped-to line as the current one
     pub find_cur: Option<i64>,
     pub keep: Option<i64>,

@@ -1,6 +1,6 @@
 //! Frontmatter YAML with PyYAML's `SafeLoader` semantics (YAML 1.1 implicit typing: yes/no/on/off
-//! booleans, sexagesimal and octal ints, dates and timestamps), converted to JSON the way the
-//! reference implementation's `jsonable` does: dates become ISO strings, keys become `str(key)`.
+//! booleans, sexagesimal and octal ints, dates and timestamps), converted to JSON by `jsonable`:
+//! dates become ISO strings, keys become `str(key)`.
 
 use std::rc::Rc;
 
@@ -541,7 +541,7 @@ fn key_str(k: &Py) -> String {
     }
 }
 
-/// The reference implementation's `jsonable`.
+/// A loaded value as JSON: dates become ISO strings, keys become `str(key)`.
 fn jsonable(v: &Py) -> Value {
     match v {
         Py::None => Value::Null,

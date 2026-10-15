@@ -1,5 +1,5 @@
-//! The server's JSON payloads, and the index as the client works with it (`ingest()` of the
-//! reference: node map, children, edges in and out, per-folder rollups).
+//! The server's JSON payloads, and the index as the client works with it (`ingest()`: node map,
+//! children, edges in and out, per-folder rollups).
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -358,7 +358,7 @@ pub fn fam_order(f: &str) -> i32 {
         .unwrap_or(9)
 }
 
-/// `SHAPE[fam]` (`None` where the reference gets `undefined`).
+/// `SHAPE[fam]` (`None` for a family with no shape).
 pub fn shape_of(f: &str) -> Option<&'static str> {
     Some(match f {
         "core" => "diamond",

@@ -27,7 +27,7 @@ await page.waitForTimeout(2500);
 async function sample(round) {
   await cdp.send('HeapProfiler.collectGarbage');
   const r = await page.evaluate(async () => {
-    let wasm = null; // okt only: the reference has no WebAssembly
+    let wasm = null; // the client's WebAssembly memory, once main.js has loaded it
     if (document.querySelector('script[src="/main.js"]')) wasm = (await (await import('/okt.js')).default()).memory.buffer.byteLength;
     return { heap: performance.memory.usedJSHeapSize, wasm };
   });

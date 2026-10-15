@@ -397,7 +397,7 @@ fn on_key(e: KeyboardEvent) {
         }
         return;
     }
-    // okt only (README, Known differences): walk the graph from the keyboard. j and k step through
+    // Walk the graph from the keyboard (README § Keys). j and k step through
     // the selection's connections; Enter or space goes to the one marked, or else opens or
     // closes the selected folder (space, Enter) or shows a file's content (Enter).
     if view == "graph" {
@@ -504,7 +504,7 @@ fn on_key(e: KeyboardEvent) {
             graph::fit();
             true
         }
-        // okt only (README, Known differences): reading, finding, pins, hand-offs
+        // reading, finding, pins, hand-offs (README § Keys)
         "J" | "K" => {
             let b = dom::id("ibody");
             let o = web_sys::ScrollToOptions::new();

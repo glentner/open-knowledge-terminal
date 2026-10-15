@@ -426,7 +426,7 @@ fn stop_background(args: &Args, root: Option<&Path>) -> i32 {
     let servers = running(port);
     let of_root = |r: &Path| servers.iter().find(|(_, i)| serves(i, r));
     // --kb names the one to stop; without it, the KB this directory belongs to, else the only one
-    // running (so `okt --stop` works from anywhere, as `bin/terminal.py --stop` did)
+    // running (so `okt --stop` works from anywhere)
     let target = match (args.kb.is_some(), root) {
         (true, Some(r)) => of_root(r),
         (true, None) => None,

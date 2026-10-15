@@ -5,13 +5,10 @@ every file and link, a file tree, the commit log, a frontmatter screener, full-t
 inspector that renders each file, its history, and its blame. It watches the repository and
 updates itself as files are saved and commits land.
 
-`okt` began as a Rust rebuild of the KB's `bin/terminal.py` with the same interface: the same
-layout, styling, keys and commands, the same JSON API, byte for byte, and pixel-for-pixel the same
-pages, apart from a few deliberate improvements (see Known differences). The reference retired from
-the KB on 2026-10-14, and okt is now its own specification. What changed is underneath. The
-server is one native binary. The client is Rust compiled to WebAssembly. It draws the graph on a
-canvas instead of restyling an SVG of a thousand elements, and it updates lists in place instead of
-re-rendering them, so panning, zooming, hovering and arrowing through lists stay at frame rate.
+The server is one native binary that indexes the repository, serves a JSON API and server-sent
+events, and embeds the client. The client is Rust compiled to WebAssembly. It draws the graph on a
+canvas and updates lists in place instead of re-rendering them, so panning, zooming, hovering and
+arrowing through lists stay at frame rate.
 
 ## Install
 
@@ -50,18 +47,18 @@ Useful flags: `--theme terminal|dark|light`, `--accent '#ffa028'`, `--font "Berk
 | Path | What |
 |---|---|
 | `okt-server/` | The `okt` binary: indexer (files, frontmatter, links, mentions, git history), JSON API, server-sent events, file watcher, markdown rendering, PWA assets. Embeds the client. |
-| `okt-client/` | The browser client (`cdylib` for `wasm32-unknown-unknown`): `src/` is a module-for-module port of the reference client; `static/` holds the page, the stylesheet and the loader. |
+| `okt-client/` | The browser client (`cdylib` for `wasm32-unknown-unknown`): `src/` has one module per pane or concern; `static/` holds the page, the stylesheet and the loader. |
 | `okt-pygments/` | Syntax highlighting that reproduces Pygments' HTML output exactly (lexer tables exported from Pygments by `tools/pygments/export.py`, run by a Rust port of Pygments' lexer engine). |
 | `vendor/markdown-it/` | markdown-it 0.6.1 with one fix (emphasis source maps across stripped line prefixes); see `Cargo.toml` `[patch.crates-io]`. |
 | `tests/env.sh` | A throwaway okt server on 6581 over a fresh clone of the KB, to run the browser tests against. |
-| `tests/ui/` | Browser tests: the keys okt adds, and a soak test for a page left open all day. |
+| `tests/ui/` | Browser tests: the navigation keys (see Keys), and a soak test for a page left open all day. |
 | `tests/perf/` | Main-thread cost and frame pacing of a fixed set of interactions, compared across two builds. |
 
 ## Tests
 
 ```sh
 make test                                                   # unit tests
-tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/keys.mjs"'     # the keys okt adds
+tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/keys.mjs"'     # the navigation keys
 tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/soak.mjs" "$OKT_KB" "$OKT"'
 ```
 
@@ -69,52 +66,40 @@ tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/soak.mjs" "$OKT_KB" "$OKT"'
 and the okt on 6580 are never touched. The browser tests need Playwright (`npm install` in
 `tests/`).
 
-Until 2026-10-14 the KB's `bin/terminal.py` was the specification, and parity suites compared the
-JSON API, raw files, the watcher and every pane against it. They retired with the reference and
-remain in the history (last at `64605fb`); `ROADMAP.md` tracks rebuilding that coverage against
-okt's own output.
+End-to-end tests of the JSON API, raw files, the watcher and the rendered panes are not written
+yet; `ROADMAP.md` tracks them.
 
-## Known differences
+## Keys
 
-From `bin/terminal.py`. All deliberate, and marked in the code:
+`?` lists every key and command, with your pins; `/` or `:` focuses the GO bar. Some worth knowing:
 
-- The name: the app is Open Knowledge Terminal and its logo reads OK, the default port is 6580,
-  settings live under `okt:` in local storage, and POSTs carry `X-OKT` (`X-KB-Terminal` is
-  accepted too). The background log and the start hint name `okt`.
-- The watcher reacts to file events in about 0.2 s instead of polling every 2 s.
+- FILES: space opens or closes the selected folder, or shows a file in the graph; `u` goes up to
+  the parent folder and folds everything under it (at the top, the whole tree); and closing a
+  folder, by any key or click, folds its subfolders too, so it reopens one level deep.
+- GRAPH: `j`/`k` step through the selection's connections in the order the inspector lists them
+  (a dashed ring, the card and the hint show where), Enter or space goes there, esc stops; with no
+  walk, space opens or closes the selected folder and Enter shows a file's content; `z` zooms to
+  the selection and its neighbors.
+- Anywhere: `J`/`K` scroll the inspector, `s` switches between source and rendered, `y` copies the
+  path, `m` pins the selection and `1`–`9` go to the pins (kept per KB), `n`/`N` step through FIND
+  matches and on into the next or previous result file, and `E`/`O`/`F` edit, open and reveal, as
+  the buttons do.
+- GO bar: ACCENT, TYPE, SHOW and AT suggest their arguments (accents, frontmatter types, recent
+  commits; for SHOW and AT the rev as typed comes first, so Enter runs it).
+
+## Details
+
+- The watcher reacts to file events in about 0.2 s; a slow safety poll catches anything they miss.
 - The background server: `okt --stop` without `--kb` stops the server for this directory's KB or,
-  failing that, the only one running (the default KB depends on the directory, where the
-  reference's was always its own repo). `okt` and `okt --detach` restart a server that runs an
+  failing that, the only one running. `okt` and `okt --detach` restart a server that runs an
   older build of the same binary instead of opening it; a server run from another binary, such as
   a development build, is left alone. `/api/hello` reports the binary's path and time for this.
 - On macOS the installed web app is found by the address it was installed from, then by the
-  `--app` name. The reference only tries the name, which misses when Safari named the Dock app
-  after the manifest's short name or something typed in its dialog, and opens a tab instead.
-- Keys the reference doesn't have (`?` lists them all, with your pins):
-  - FILES: space opens or closes the selected folder, or shows a file in the graph; `u` goes up
-    to the parent folder and folds everything under it (at the top, the whole tree); and closing
-    a folder, by any key or click, folds its subfolders too, so it reopens one level deep.
-  - GRAPH: `j`/`k` step through the selection's connections in the order the inspector lists
-    them (a dashed ring, the card and the hint show where), Enter or space goes there, esc stops;
-    with no walk, space opens or closes the selected folder and Enter shows a file's content;
-    `z` zooms to the selection and its neighbors.
-  - Anywhere: `J`/`K` scroll the inspector, `s` switches between source and rendered, `y` copies
-    the path, `m` pins the selection and `1`–`9` go to the pins (kept per KB), `n`/`N` step
-    through FIND matches and on into the next or previous result file, and `E`/`O`/`F` edit,
-    open and reveal, as the buttons do.
+  `--app` name. The name alone misses when Safari named the Dock app after the manifest's short
+  name or something typed in its dialog.
 - Markdown tables: a column is never narrower than its longest word (links may still break),
   short cells (a word, number or identifier up to 24 characters, any text up to 12) stay on one
-  line, and a wide table may run past the prose measure to the edge of the pane. In the reference
-  every column can shrink to one letter while the longest takes the width.
-- Three bugs of the reference are fixed:
-  - Hollow graph shapes (records, external systems) are outlined in their family color, as the
-    legend draws them. In the reference a stylesheet rule overrides their stroke and they paint
-    as background.
-  - The GO bar suggests arguments for ACCENT, TYPE, SHOW and AT (accents, frontmatter types,
-    recent commits; for SHOW and AT the rev as typed comes first, so Enter runs it). In the
-    reference a dangling `else` means they only ever list the command itself.
-  - A node that flashed after a change gets its selection ring back when the flash ends. In the
-    reference the ring stays hidden until the graph is rebuilt.
+  line, and a wide table may run past the prose measure to the edge of the pane.
 
 ## License
 

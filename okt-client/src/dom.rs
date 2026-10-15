@@ -237,7 +237,7 @@ pub fn perf_now() -> f64 {
         .unwrap_or_else(js_sys::Date::now)
 }
 
-/// A trailing-edge debounce, like the reference's `debounce(fn, ms)`.
+/// A trailing-edge debounce, like JavaScript's usual `debounce(fn, ms)`.
 pub struct Debounce {
     handle: std::sync::atomic::AtomicI32,
     ms: i32,
@@ -258,7 +258,7 @@ impl Debounce {
     }
 }
 
-/// Report a failure the reference would have thrown (unhandled rejection) to the console.
+/// Report a failure that would otherwise be an unhandled rejection to the console.
 pub fn log_err(ctx: &str, msg: &str) {
     web_sys::console::error_1(&JsValue::from_str(&format!("{ctx}: {msg}")));
 }

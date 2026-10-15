@@ -1,8 +1,8 @@
-//! Markdown to HTML, matching the reference renderer (markdown-it-py's commonmark preset with
-//! tables, strikethrough, linkify, front matter, task lists, footnotes and definition lists) and its
-//! token rewriting: `data-line` on blocks, heading ids, KB links resolved to `#/f/...`, images served
-//! from `/raw/`, path-like code spans and `[[wiki]]` links turned into KB links. The output is
-//! sanitized with ammonia (the library nh3 wraps), configured the same way.
+//! Markdown to HTML, matching markdown-it-py's commonmark preset with tables, strikethrough,
+//! linkify, front matter, task lists, footnotes and definition lists, plus okt's token rewriting:
+//! `data-line` on blocks, heading ids, KB links resolved to `#/f/...`, images served from `/raw/`,
+//! path-like code spans and `[[wiki]]` links turned into KB links. The output is sanitized with
+//! ammonia (the library Python's nh3 wraps).
 
 use std::collections::{HashMap, HashSet};
 
@@ -104,7 +104,7 @@ impl LinkFormatter for PyLinkFormatter {
 
 // ---- nodes rendered with an exact attribute order ---------------------------------------------
 
-/// `<a ...>` with attributes in the order the reference renderer emits them.
+/// `<a ...>` with attributes in a fixed order, as markdown-it-py emits them.
 #[derive(Debug)]
 pub struct A {
     pub attrs: Vec<(&'static str, String)>,

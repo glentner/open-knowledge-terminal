@@ -1,5 +1,5 @@
-//! Talking to the server: `api()` and `post()` of the reference, returning the body text so the
-//! caller can parse it into the payload type it expects.
+//! Talking to the server: `api()` and `post()`, returning the body text so the caller can parse
+//! it into the payload type it expects.
 
 use serde::de::DeserializeOwned;
 use wasm_bindgen::{JsCast, JsValue};
@@ -10,7 +10,7 @@ use crate::dom::win;
 
 #[derive(Debug, Clone)]
 pub enum ApiError {
-    /// fetch itself failed (no server): a `TypeError` in the reference
+    /// fetch itself failed (no server): a `TypeError` from `fetch`
     Network(String),
     /// the server answered with an error (its `error` message, or the status text)
     Http(String),

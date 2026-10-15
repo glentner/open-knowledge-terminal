@@ -1,6 +1,6 @@
-//! The Open Knowledge Terminal browser client: a line-for-line port of the reference client
-//! (`bin/terminal.py`'s APP_JS) to Rust/WebAssembly, with the graph drawn on a canvas and the
-//! lists updated in place, which is where the reference spent its frames.
+//! The Open Knowledge Terminal browser client, in Rust/WebAssembly, with the graph drawn on a
+//! canvas and the lists updated in place, so panning, zooming and arrowing through lists stay at
+//! frame rate.
 
 mod actions;
 mod api;
@@ -30,7 +30,7 @@ pub fn start() {
     spawn(boot());
 }
 
-/// `start()` of the reference.
+/// Boot: apply the theme, wire the panes and keys, then load the first index.
 async fn boot() {
     theme::apply_theme();
     graph::wire();

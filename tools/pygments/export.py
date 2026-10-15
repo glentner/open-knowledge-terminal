@@ -60,8 +60,9 @@ assert pygments.__version__ == '2.21.0', pygments.__version__
 # Which lexers to export
 # --------------------------------------------------------------------------------------------
 
-# Lexers the reference can reach (see terminal.py `classify` + `highlight_lines`), in rough
-# priority order. Lexers they delegate to via using() are added automatically.
+# Lexers okt can reach (its file classification plus the lexer choice in okt-pygments'
+# `registry.rs`), in rough priority order. Lexers they delegate to via using() are added
+# automatically.
 SUPPORTED = [
     'PythonLexer', 'BashLexer', 'JsonLexer', 'YamlLexer', 'TOMLLexer', 'HtmlLexer',
     'JavascriptLexer', 'TypeScriptLexer', 'TsxLexer', 'JsxLexer', 'CssLexer', 'ScssLexer',
@@ -102,7 +103,7 @@ KNOWN_CALLBACKS = {
     'RebolLexer.word_callback': 'rebol_word',
 }
 
-# Lexer options the reference passes (highlight_lines: stripnl=False, ensurenl=False).
+# Lexer options okt highlights with (see `highlight_lines` in check.py).
 OPTIONS = {'stripnl': False, 'ensurenl': False}
 
 # Token types created at lex time by code we hand-port (so they don't exist after import).

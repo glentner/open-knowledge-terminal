@@ -1,4 +1,4 @@
-//! Highlight files the way the reference does and print the result as JSON.
+//! Highlight files the way okt does and print the result as JSON.
 //!
 //! ```text
 //! cargo run --release -p okt-pygments --example hl -- FILE [--path LOGICAL_PATH] [--lang ALIAS]
@@ -6,7 +6,7 @@
 //! ```
 //!
 //! Single file: prints the JSON array of lines, or `{"unsupported": "<LexerClass>"}`.
-//! The file is decoded like the reference does (`bytes.decode('utf-8', 'replace')`).
+//! The file is decoded as `bytes.decode('utf-8', 'replace')` would.
 //!
 //! `--batch`: reads lines of `FILE\tPATH\tLANG` (PATH/LANG may be empty) from stdin and prints
 //! one JSON value per line, so a test driver can check many files with one process.

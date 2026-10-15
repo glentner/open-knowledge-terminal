@@ -1,4 +1,4 @@
-//! JavaScript semantics, where the reference client's output depends on them: number to string,
+//! JavaScript semantics, where the client's output depends on them: number to string,
 //! `toFixed`, `toLocaleString('en-US')`, `String(value)`, `JSON.stringify`, `parseFloat`, string
 //! whitespace, UTF-16 lengths and slices, object key order, dates in local time, and collation
 //! (`localeCompare`). The views are ported line for line, and these keep their text identical.
@@ -10,7 +10,7 @@ use wasm_bindgen::{JsCast, JsValue};
 
 // ---- escaping -------------------------------------------------------------------------------
 
-/// `esc()` of the reference client: `& < > " '`.
+/// `esc()`: `& < > " '`.
 pub fn esc(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for c in s.chars() {

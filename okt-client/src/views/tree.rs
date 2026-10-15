@@ -1,5 +1,5 @@
-//! FILES: the tree view. Rendered from the same row model as the reference; when only the
-//! selection moved (arrow keys), the rows stay and just the highlight moves.
+//! FILES: the tree view, rendered from a row model; when only the selection moved (arrow keys),
+//! the rows stay and just the highlight moves.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -280,8 +280,8 @@ fn toggle_row(id: &str, row: &web_sys::Element) {
     }
 }
 
-/// Deviation from the reference: closing a folder closes every folder under it too, so opening it
-/// again shows one level, not the subfolders that were open before.
+/// Closing a folder closes every folder under it too, so opening it again shows one level, not the
+/// subfolders that were open before.
 fn fold(id: &str) {
     fold_below(id);
     cfg_mut().tree_open.insert(id.to_string(), false);
@@ -401,9 +401,9 @@ pub fn key(e: &KeyboardEvent) -> bool {
             }
             return true;
         }
-        // Deviation from the reference (home-row keys, as in ncdu): space opens or closes a folder
-        // and shows a file in the graph; u goes up to the parent folder and folds everything under
-        // it, so walking up tidies the tree behind you (at the top, the whole tree folds).
+        // Home-row keys, as in ncdu: space opens or closes a folder and shows a file in the graph;
+        // u goes up to the parent folder and folds everything under it, so walking up tidies the
+        // tree behind you (at the top, the whole tree folds).
         " " if id.is_some() => {
             let id = id.unwrap();
             if idx.is_dir(&id) {

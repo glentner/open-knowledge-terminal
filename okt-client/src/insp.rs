@@ -481,8 +481,8 @@ fn edge_label(k: &str, out: bool) -> &'static str {
     }
 }
 
-/// What j and k step through in the graph (okt only): a folder's subfolders and files in tree
-/// order, then the Connections groups in the order the inspector shows them, each node once.
+/// What j and k step through in the graph: a folder's subfolders and files in tree order,
+/// then the Connections groups in the order the inspector shows them, each node once.
 pub fn walk_list(idx: &Idx, id: &str) -> Vec<(String, &'static str)> {
     let mut out: Vec<(String, &'static str)> = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -1399,12 +1399,10 @@ fn data_table(t: &DataTable, sort: Option<(usize, i32)>) -> String {
     html + "</div>"
 }
 
-/// Deviation from the reference: short markdown table cells stay on one line (`nw`): a single
-/// word, number or identifier of up to 24 characters, or any text of up to 12. A column of labels
-/// or numbers is then as wide as its widest value, and the long-text columns share the rest; a
-/// longer phrase may still wrap between words, so a tight table can narrow it instead of
-/// scrolling. In the reference `.md`'s `overflow-wrap: anywhere` lets every column shrink to one
-/// letter, and the longest column takes the whole width. Runs before any scrolling, since it
+/// Short markdown table cells stay on one line (`nw`): a single word, number or identifier of up
+/// to 24 characters, or any text of up to 12. A column of labels or numbers is then as wide as its
+/// widest value, and the long-text columns share the rest; a longer phrase may still wrap between
+/// words, so a tight table can narrow it instead of scrolling. Runs before any scrolling, since it
 /// changes the height of the page.
 fn size_md_tables(root: &Element) {
     for cell in dom::qa_in(root, "article.md table th, article.md table td") {

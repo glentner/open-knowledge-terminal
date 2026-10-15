@@ -83,9 +83,9 @@ fn spawn(cmd: &[String]) -> std::io::Result<()> {
 
 /// Open the terminal: the installed web app when there is one (macOS), else a browser tab.
 ///
-/// Deviation from the reference, which only tries `open -a <app name>`: the web app is first found
-/// by the address it was installed from. Safari names a Dock app after the manifest's short name,
-/// or whatever was typed in its dialog, so the name alone often misses and a tab opens instead.
+/// The web app is found first by the address it was installed from, then by `open -a <app name>`.
+/// Safari names a Dock app after the manifest's short name, or whatever was typed in its dialog,
+/// so the name alone often misses and a tab opens instead.
 pub fn open_ui(url: &str, how: &str, app_name: &str) -> String {
     if how == "none" {
         return "nothing".into();

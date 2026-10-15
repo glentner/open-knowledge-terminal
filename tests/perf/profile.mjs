@@ -63,7 +63,7 @@ async function scenario(name, fn) {
 const results = [];
 const box = await page.locator('#graph').boundingBox();
 const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
-// the same screen points in both (the layouts are identical): nodes from the reference's SVG
+// fixed screen points of a spread of file nodes at 1920x1080 (fit view), the same for every build
 const pts = JSON.parse(fs.readFileSync(new URL('./points.json', import.meta.url)));
 
 results.push(await scenario('idle_3s', async () => { await page.waitForTimeout(3000); }));

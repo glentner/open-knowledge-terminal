@@ -11,9 +11,9 @@ use crate::config::*;
 use crate::util::*;
 use crate::yaml;
 
-// These mirror the reference's Python regexes, so the character classes are spelled with Python's
-// meanings: `\w` is [\p{L}\p{N}_] (Rust's also takes marks and connector punctuation, Python's also
-// takes No), and `\s` also takes \x1c-\x1f.
+// These regexes keep Python's `re` meanings for character classes, so those are spelled out:
+// `\w` is [\p{L}\p{N}_] (Rust's also takes marks and connector punctuation, Python's also takes
+// No), and `\s` also takes \x1c-\x1f.
 pub static FENCE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[\s\x1c-\x1f]{0,3}(`{3,}|~{3,})").unwrap());
 pub static LINK_RE: Lazy<Regex> = Lazy::new(|| {

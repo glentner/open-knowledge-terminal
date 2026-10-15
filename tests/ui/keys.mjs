@@ -1,5 +1,4 @@
-// Keys okt adds that have no counterpart in the reference (README, Known differences), checked on
-// their own against a running okt:
+// The navigation keys (README § Keys), checked on their own against a running okt:
 //   FILES  u walks up and folds what is under the new parent; space opens or closes a folder
 //          (closing folds everything inside) and shows a file in the graph
 //   GRAPH  j/k step through the selection's connections, Enter/space go there, esc stops;

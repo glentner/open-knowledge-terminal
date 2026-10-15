@@ -1,5 +1,5 @@
 //! Unit tests. The byte-for-byte comparison against Pygments itself lives in
-//! `tools/pygments/check.py` (it needs the reference Python).
+//! `tools/pygments/check.py` (it needs Python with Pygments 2.21.0).
 
 use super::*;
 
@@ -97,7 +97,7 @@ fn fallback_escapes_quotes() {
 
 #[test]
 fn python_basics() {
-    // Expected output taken from the reference (Pygments 2.21.0 via terminal.py).
+    // Expected output taken from Pygments 2.21.0 (`highlight_lines` in check.py).
     assert_eq!(
         lines("def f(x):\n    return x  # c\n", "a.py"),
         [

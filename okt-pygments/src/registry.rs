@@ -1,4 +1,4 @@
-//! Lexer selection, as `highlight_lines` in the reference does it:
+//! Lexer selection, as the Python `highlight_lines` does it (see the crate docs):
 //!
 //! * `get_lexer_by_name(alias)`: the first entry of `LEXERS` (in mapping order) whose aliases
 //!   contain `alias.lower()`;
@@ -51,7 +51,7 @@ pub(crate) fn for_filename<'d>(data: &'d Data, name: &str) -> Option<&'d RegEntr
     best.map(|(_, e)| e)
 }
 
-/// The reference's fallback for files no glob matches: guess from a `#!` line.
+/// The fallback for files no glob matches: guess from a `#!` line.
 pub(crate) fn for_shebang<'d>(data: &'d Data, text: &str) -> Option<&'d RegEntry> {
     let first = text.split('\n').next().unwrap_or("");
     if !first.starts_with("#!") {

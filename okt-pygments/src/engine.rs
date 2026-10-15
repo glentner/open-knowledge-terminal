@@ -41,9 +41,9 @@ impl<'t> Tok<'t> {
     }
 }
 
-/// A lexer instance: the class plus the options that change its behaviour. The reference
-/// passes only `stripnl`/`ensurenl` (handled in preprocessing), so the only option that
-/// matters is PhpLexer's `startinline`, which `using(this, _startinline=True)` sets.
+/// A lexer instance: the class plus the options that change its behaviour. okt passes only
+/// `stripnl`/`ensurenl` (handled in preprocessing), so the only option that matters is
+/// PhpLexer's `startinline`, which `using(this, _startinline=True)` sets.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Inst {
     pub id: LexId,

@@ -4,22 +4,22 @@ kind: tests
 appetite: big
 ---
 
-# Regression tests for what the parity suites covered
+# End-to-end regression tests
 
 > **Candidate, not a contract.** `code okt feature issues/regression-suite.md` promotes it;
 > appetite, non-goals and R-IDs get negotiated there.
 
 ## Problem
 
-Until 2026-10-14 the KB's `bin/terminal.py` was okt's specification, and the parity suites checked
-okt against it end to end. The reference retired from the KB that day, and the suites went with it.
-What remains is the Rust unit tests, `tests/ui/keys.mjs` and `tests/ui/soak.mjs`. Nothing now
-checks the JSON API, raw files, the watcher or the rendered panes, so a regression there reaches
-the installed okt unseen. The release gate is correspondingly thinner.
+okt's tests are the Rust unit tests, `tests/ui/keys.mjs` and `tests/ui/soak.mjs`. Nothing checks
+the JSON API, raw files, the watcher or the rendered panes end to end, so a regression there
+reaches the installed okt unseen, and the release gate is correspondingly thin.
 
 ## Evidence
 
-The retired suites are in the history (last at `64605fb`) and show what the coverage was:
+Suites removed in `b8f4f3e` show the shape the coverage once had; they compared okt against
+another implementation rather than against recorded output, so they are a map, not a starting
+point:
 
 | Suite | Covered |
 |---|---|
@@ -29,10 +29,6 @@ The retired suites are in the history (last at `64605fb`) and show what the cove
 | `tests/ui/dom_diff.mjs` | the HTML of every pane across ~60 interactions |
 | `tests/ui/shots.mjs` + `tests/ui/diff.py` | screenshots and pixel diffs |
 | `tests/ui/live_diff.mjs` | live updates: toasts, status, inspector, ticker, tree |
-
-The last parity run, on 2026-10-09 inside the throwaway environment, found 537 of 538 files
-identical through `api_diff.py`; the one difference is the declined
-`issues/tight-list-fence-newline.md`.
 
 ## Possible acceptance (to negotiate)
 
@@ -45,4 +41,3 @@ identical through `api_diff.py`; the one difference is the declined
 ## Non-goals (to negotiate)
 
 - Pixel diffs.
-- Byte-compatibility with `bin/terminal.py`.

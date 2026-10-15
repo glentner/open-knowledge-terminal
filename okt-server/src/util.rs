@@ -1,5 +1,5 @@
-//! Small helpers. Several mirror Python's string semantics exactly, because the JSON this server
-//! produces is held to byte parity with the reference implementation.
+//! Small helpers. Several mirror Python's string semantics exactly, so the JSON this server
+//! produces stays byte-stable.
 
 use std::path::Path;
 

@@ -285,7 +285,7 @@ fn run_named(c: &Cmd, a: &str) {
     }
 }
 
-/// `fuzzy(q, s)` on UTF-16 code units, like the reference.
+/// `fuzzy(q, s)` on UTF-16 code units, as JavaScript strings index.
 fn fuzzy(q: &[u16], s: Option<&str>) -> f64 {
     let Some(s) = s.filter(|s| !s.is_empty()) else {
         return -1.0;
@@ -468,9 +468,7 @@ fn suggestions(raw: &str) -> Vec<Sug> {
                 run: Run::Cmd(format!("{} {fill}", cmd.k)),
             });
         };
-        // Deviation from the reference: ACCENT, TYPE, SHOW and AT get their suggestions. The
-        // reference's if/else chain has a dangling `else` (the branches after "theme" attach to
-        // the `if` inside the theme loop), so they only ever list the command itself.
+        // ACCENT, TYPE, SHOW and AT get their argument suggestions too.
         match cmd.arg {
             Some("folder") => {
                 let list: Vec<&Node> = if !q.is_empty() {
@@ -524,7 +522,7 @@ fn suggestions(raw: &str) -> Vec<Sug> {
                         *types.entry(t.clone()).or_insert(0) += 1;
                     }
                 }
-                // a Map in the reference: insertion order, then a stable sort by count
+                // insertion order (as a JavaScript Map keeps it), then a stable sort by count
                 let ql = js::lower(&q);
                 let mut tv: Vec<(String, usize)> = types
                     .into_iter()

@@ -1,7 +1,7 @@
 {
   "name": "okt-tests",
   "private": true,
-  "description": "Browser tests for the Open Knowledge Terminal: the keys okt adds, a soak test and frame timing",
+  "description": "Browser tests for the Open Knowledge Terminal: the navigation keys, a soak test and frame timing",
   "type": "module",
   "devDependencies": {
     "playwright": "^1.50.0"

@@ -1,6 +1,6 @@
-//! Source highlighting into per-line HTML, byte-identical to the reference's Pygments output
-//! (see the `okt-pygments` crate). For the rare file whose Pygments lexer isn't ported, the lines
-//! are shown escaped but uncolored -- what the reference itself does when it has no lexer.
+//! Source highlighting into per-line HTML, byte-identical to Pygments' output (see the
+//! `okt-pygments` crate). For the rare file whose Pygments lexer isn't ported, the lines are shown
+//! escaped but uncolored, as for a file no lexer matches.
 
 use okt_pygments::Highlight;
 

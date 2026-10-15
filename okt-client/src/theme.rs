@@ -1,4 +1,4 @@
-//! Color: OKLCH helpers, accent derivations, monochrome families (`applyTheme()` of the reference).
+//! Color: OKLCH helpers, accent derivations, monochrome families (`applyTheme()`).
 
 use crate::dom;
 use crate::js;
