@@ -5,9 +5,10 @@ every file and link, a file tree, the commit log, a frontmatter screener, full-t
 inspector that renders each file, its history, and its blame. It watches the repository and
 updates itself as files are saved and commits land.
 
-`okt` is a Rust rebuild of the KB's `bin/terminal.py` with the same interface: the same layout,
-styling, keys and commands, the same JSON API, byte for byte, and pixel-for-pixel the same pages,
-apart from a few deliberate improvements (see Known differences). What changed is underneath. The
+`okt` began as a Rust rebuild of the KB's `bin/terminal.py` with the same interface: the same
+layout, styling, keys and commands, the same JSON API, byte for byte, and pixel-for-pixel the same
+pages, apart from a few deliberate improvements (see Known differences). The reference retired from
+the KB on 2026-10-14, and okt is now its own specification. What changed is underneath. The
 server is one native binary. The client is Rust compiled to WebAssembly. It draws the graph on a
 canvas instead of restyling an SVG of a thousand elements, and it updates lists in place instead of
 re-rendering them, so panning, zooming, hovering and arrowing through lists stay at frame rate.
@@ -52,29 +53,30 @@ Useful flags: `--theme terminal|dark|light`, `--accent '#ffa028'`, `--font "Berk
 | `okt-client/` | The browser client (`cdylib` for `wasm32-unknown-unknown`): `src/` is a module-for-module port of the reference client; `static/` holds the page, the stylesheet and the loader. |
 | `okt-pygments/` | Syntax highlighting that reproduces Pygments' HTML output exactly (lexer tables exported from Pygments by `tools/pygments/export.py`, run by a Rust port of Pygments' lexer engine). |
 | `vendor/markdown-it/` | markdown-it 0.6.1 with one fix (emphasis source maps across stripped line prefixes); see `Cargo.toml` `[patch.crates-io]`. |
-| `tests/parity/` | API parity against a running reference server: every file, folder, commit, search, blame, raw file, and the watcher's events. |
-| `tests/ui/` | Browser parity: screenshots and pixel diffs, the HTML of every pane across ~60 interactions, live updates; a soak test for a page left open all day. |
-| `tests/perf/` | Main-thread cost and frame pacing of the same interactions in both clients. |
+| `tests/env.sh` | A throwaway okt server on 6581 over a fresh clone of the KB, to run the browser tests against. |
+| `tests/ui/` | Browser tests: the keys okt adds, and a soak test for a page left open all day. |
+| `tests/perf/` | Main-thread cost and frame pacing of a fixed set of interactions, compared across two builds. |
 
-## Parity
-
-Until the reference retires, `bin/terminal.py` is the specification. With both running against
-the same KB (reference on 8376, okt on 6580):
+## Tests
 
 ```sh
-python3 tests/parity/api_diff.py          # JSON API, every file and folder
-python3 tests/parity/raw_diff.py          # /raw/ bytes and headers
-node tests/ui/dom_diff.mjs                # pane HTML across interactions
-node tests/ui/shots.mjs /tmp/shots && python3 tests/ui/diff.py /tmp/shots
+make test                                                   # unit tests
+tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/keys.mjs"'     # the keys okt adds
+tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/soak.mjs" "$OKT_KB" "$OKT"'
 ```
 
-Watch-mode checks (`tests/parity/watch_diff.py`, `tests/ui/live_diff.mjs`) run against a scratch
-clone of the KB. `tests/ui/keys.mjs` checks the keys okt adds on its own. The browser tests need
-Playwright (`npm install` in `tests/`).
+`tests/env.sh` builds the current tree and serves a fresh clone of the KB on 6581, so the real KB
+and the okt on 6580 are never touched. The browser tests need Playwright (`npm install` in
+`tests/`).
 
-### Known differences
+Until 2026-10-14 the KB's `bin/terminal.py` was the specification, and parity suites compared the
+JSON API, raw files, the watcher and every pane against it. They retired with the reference and
+remain in the history (last at `64605fb`); `ROADMAP.md` tracks rebuilding that coverage against
+okt's own output.
 
-All deliberate, and marked in the code:
+## Known differences
+
+From `bin/terminal.py`. All deliberate, and marked in the code:
 
 - The name: the app is Open Knowledge Terminal and its logo reads OK, the default port is 6580,
   settings live under `okt:` in local storage, and POSTs carry `X-OKT` (`X-KB-Terminal` is
@@ -113,10 +115,6 @@ All deliberate, and marked in the code:
     reference a dangling `else` means they only ever list the command itself.
   - A node that flashed after a change gets its selection ring back when the flash ends. In the
     reference the ring stays hidden until the graph is rebuilt.
-
-`tests/ui/dom_diff.mjs` expects its GO-suggestion and help steps to differ and ignores
-the class that marks short table cells; the graph screenshots differ where the hollow shapes
-paint, and content screenshots where tables lay out differently.
 
 ## License
 
