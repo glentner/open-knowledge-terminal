@@ -1,6 +1,6 @@
-// Main-thread cost and frame pacing of the same interactions in the reference and in okt.
+// Main-thread cost and frame pacing of a fixed set of interactions in okt.
 //   node tests/perf/profile.mjs <url> <label> [width height dpr]
-// Writes results-<label>.json. Run both and compare (tests/perf/compare.py).
+// Writes results-<label>.json. Run two builds and compare (tests/perf/compare.py).
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 import fs from 'node:fs';
 
@@ -114,7 +114,7 @@ results.push(await scenario('go_typing', async () => {
   await page.keyboard.press('Escape');
 }));
 results.push(await scenario('content_load', async () => {
-  for (const p of ['workspace/pearc28/research/location/floorplan.md', 'memory/inbox.md', 'skill/dream.md', 'AGENTS.md', 'policy/attention.md', 'bin/terminal.py']) {
+  for (const p of ['workspace/pearc28/research/location/floorplan.md', 'memory/inbox.md', 'skill/dream.md', 'AGENTS.md', 'policy/attention.md', 'bin/kb-lint']) {
     await page.evaluate(p => { location.hash = '#v=graph&s=' + encodeURIComponent(p) + '&tab=content'; }, p);
     await page.waitForTimeout(1000);
   }

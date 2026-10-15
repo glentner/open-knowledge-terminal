@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Side-by-side table of two tests/perf/profile.mjs runs.
 
-    node tests/perf/profile.mjs http://127.0.0.1:8376/ ref
-    node tests/perf/profile.mjs http://127.0.0.1:6580/ okt
-    python3 tests/perf/compare.py results-ref.json results-okt.json
+    node tests/perf/profile.mjs http://127.0.0.1:6580/ before
+    node tests/perf/profile.mjs http://127.0.0.1:6581/ after
+    python3 tests/perf/compare.py results-before.json results-after.json
 
 Lower is better everywhere: main-thread busy time, frame interval percentiles (16.7 ms is a
 locked 60 fps), frames over 33 ms, long-task time, and input events that took longer than 16 ms.
