@@ -33,6 +33,41 @@ output.
 
 ---
 
+# Part II — Views
+
+The current run, in order. Each entry is one feature cycle.
+
+### 2. The graph as a navigable 3D space
+
+The radial graph draws everything at once, so it no longer helps anyone navigate. Rebuild it as
+galaxy, system and focus scales, with a camera that solves the viewing angle and visibility decided
+by graph distance from the focus.
+
+**Seed:** [`issues/graph-galaxy.md`](issues/graph-galaxy.md)
+
+### 3. Pane arrangements
+
+The view pane and the inspector are fixed left and right. Make panes placeable, swappable,
+stackable and collapsible, with saved arrangements, so a third view (the dream inbox, an agent chat)
+has somewhere to go.
+
+**Seed:** [`issues/pane-arrangements.md`](issues/pane-arrangements.md)
+
+### 4. Files columns by priority
+
+As the pane narrows, Name is crushed first. Keep Name whole up to a cap, and drop the other columns
+in a set order instead.
+
+**Seed:** [`issues/files-column-priority.md`](issues/files-column-priority.md)
+
+### 5. Compact History
+
+History rows are two lines tall. Make them one line under the Log's day rules.
+
+**Seed:** [`issues/history-log-rows.md`](issues/history-log-rows.md)
+
+---
+
 ## Settled questions
 
 None yet.
