@@ -5,6 +5,8 @@
 //! `.halo`, `.ebase`, `.ehot`, `.spotlit`, ...), once per animation frame and only when something
 //! changed. Input handlers never read layout; they update the view and schedule a frame.
 
+mod space;
+
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
@@ -636,6 +638,8 @@ pub struct G {
     pub x: f64,
     pub y: f64,
     pub lay: Rc<Layout>,
+    /// the 3D layout of every node in the index (not drawn yet)
+    space: Rc<space::Space>,
     nodes: Vec<VNode>,
     at: HashMap<String, usize>,
     colors: Option<Colors>,
@@ -668,7 +672,8 @@ pub struct G {
 
 thread_local! {
     static GS: &'static std::cell::RefCell<G> = Box::leak(Box::new(std::cell::RefCell::new(G {
-        canvas: None, ctx: None, k: 1.0, x: 0.0, y: 0.0, lay: Rc::new(Layout::default()), nodes: vec![], at: HashMap::new(),
+        canvas: None, ctx: None, k: 1.0, x: 0.0, y: 0.0, lay: Rc::new(Layout::default()),
+        space: Rc::new(space::Space::default()), nodes: vec![], at: HashMap::new(),
         colors: None, base: vec![], hot: vec![], sel_vis: None, nbr: vec![], spotlit: false, spot: None, shown: vec![],
         sk: 1.0, lab_sk: 0.0, decl_t: 0.0, decl_timer: 0, hover: None, cursor: None, flash: vec![], w: 0.0, h: 0.0, dpr: 1.0,
         host_rect: (0.0, 0.0, 0.0, 0.0), raf: 0, anim: None, drag: None, built: false, layers: vec![],
@@ -693,6 +698,17 @@ pub fn rep_of(id: &str) -> String {
 /// `buildGraph(flash)`
 pub fn build(flash: &[String]) {
     let Some(idx) = state::idx() else { return };
+    let lnodes: Vec<space::LNode> = idx
+        .nodes
+        .iter()
+        .map(|n| space::LNode {
+            id: n.id.clone(),
+            parent: n.parent.clone(),
+            is_dir: n.t == "dir" || n.t == "root",
+            ft: n.ft,
+        })
+        .collect();
+    let sp = Rc::new(space::layout(&lnodes));
     let lay = Rc::new(layout(&idx));
     let dirty = idx.dirty();
     let mut nodes = Vec::with_capacity(lay.vis.len());
@@ -850,6 +866,7 @@ pub fn build(flash: &[String]) {
     {
         let mut gs = g();
         gs.lay = lay.clone();
+        gs.space = sp.clone();
         gs.flash.clear();
         for id in flash {
             let r = lay.rep_or(id).to_string();
@@ -872,9 +889,34 @@ pub fn build(flash: &[String]) {
         let rep = gs.lay.rep_or(&t).to_string();
         gs.cursor = gs.at.get(&rep).copied();
     }
+    publish_space(&lnodes, &sp, idx.files().count());
     apply_view();
     update();
     render_legend(&idx);
+}
+
+/// Publish the 3D layout for tests: `#graph[data-layout]` (its fingerprint), `#graph[data-total]`
+/// (cards in the index) and, when a test has put an object on `window.__oktPos`, a fresh
+/// `{id: [x, y, z]}` there. Runs with no graph state borrowed.
+fn publish_space(nodes: &[space::LNode], sp: &space::Space, total: usize) {
+    if let Some(cv) = dom::try_id("graph") {
+        let _ = cv.set_attribute("data-layout", &format!("{:016x}", space::digest(nodes, sp)));
+        let _ = cv.set_attribute("data-total", &total.to_string());
+    }
+    let key = JsValue::from_str("__oktPos");
+    let win = dom::win();
+    if !js_sys::Reflect::get(&win, &key)
+        .map(|v| v.is_object())
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let out = js_sys::Object::new();
+    for (n, p) in nodes.iter().zip(&sp.pos) {
+        let xyz = js_sys::Array::of3(&p[0].into(), &p[1].into(), &p[2].into());
+        let _ = js_sys::Reflect::set(&out, &JsValue::from_str(&n.id), &xyz);
+    }
+    let _ = js_sys::Reflect::set(&win, &key, &out);
 }
 
 fn render_legend(idx: &Idx) {

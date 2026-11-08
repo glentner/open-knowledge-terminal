@@ -6,18 +6,19 @@ appetite: big
 status: in_progress
 branch: feat/graph-galaxy
 base: main
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-08'
 phases:
 - id: P1
   name: Deterministic 3D layout
-  status: pending
+  status: done
   satisfies:
   - R10
   depends_on: []
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: sh spec/graph-galaxy/verify/gate.sh P1
 - id: P2
   name: WebGL2 scene and the orbit camera
@@ -202,8 +203,8 @@ Its hash and positions are visible in the running app, stable across a shuffled 
 cards to the throwaway KB moves nothing outside their folders. Nothing is drawn from it yet; the 2D
 graph keeps painting.
 
-- [ ] `okt-client/src/model.rs`: `Node` gains `#[serde(default)] pub ft: Option<f64>`.
-- [ ] `okt-client/src/graph/space.rs`, with `graph.rs` declaring `mod space;`. It uses `std` only and
+- [x] `okt-client/src/model.rs`: `Node` gains `#[serde(default)] pub ft: Option<f64>`.
+- [x] `okt-client/src/graph/space.rs`, with `graph.rs` declaring `mod space;`. It uses `std` only and
       no hashed collections. It holds `LNode`, `Space`, `pub fn layout(nodes: &[LNode]) -> Space`,
       and the pinning line `const _: fn(&[LNode]) -> Space = layout;`.
   - Contents: the hash, birth order, region and cap lattices, depth radii, card seeding,
@@ -213,7 +214,10 @@ graph keeps painting.
     after every committed sibling, with ties by path (GOAL Clarification on R10).
   - A comment says why `layout` takes no edges or counts, and names R10's known exceptions from the
     Clarification.
-- [ ] Tests in `space.rs` (names in `verify/required.txt`). Each R10 test asserts bitwise equality
+  - *Amended in build (2026-11-08):* the `@` slot is reserved on the region lattice before any
+    region, and surfaces sit within a fixed radius, so surfaces and regions never displace each
+    other (PLAN § 2.2, Regions and Surfaces).
+- [x] Tests in `space.rs` (names in `verify/required.txt`). Each R10 test asserts bitwise equality
       for **every** pre-existing node outside the new card's folders: cards, folder nodes and
       surfaces. The fixture gives every committed folder an `ft`.
   - `deterministic`: run twice, compare bitwise.
@@ -230,12 +234,12 @@ graph keeps painting.
     regions and root.
   - `spread`: region min angle ≥ 25° on a 21-region fixture, within-folder min distance ≥ 0.95 × 10,
     no NaN.
-- [ ] `graph.rs` `build()`:
+- [x] `graph.rs` `build()`:
   - Build `LNode`s from the `Idx`, call `space::layout`, and keep the `Space` in `G` (an `Rc`).
   - Set `#graph[data-layout]` (FNV-1a over positions quantised to 1e-6) and `#graph[data-total]`.
   - Fill `window.__oktPos` when a test installed it.
   - The 2D paint is unchanged.
-- [ ] `tests/ui/keys.mjs`: the P1 rows of `verify/checks.txt`, plus a console listener that fails the
+- [x] `tests/ui/keys.mjs`: the P1 rows of `verify/checks.txt`, plus a console listener that fails the
       run on "panicked at" or "already borrowed". The probe writes go to `$OKT_KB`, the env.sh clone,
       never `~/KB`.
 - **Verify:** `sh spec/graph-galaxy/verify/gate.sh P1`.

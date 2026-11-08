@@ -5,7 +5,10 @@
 //          space with no walk opens or closes the selected folder; z frames the selection
 //   ANY    J/K scroll the inspector, s source/rendered, y copies the path, m and 1-9 pins,
 //          n/N FIND matches, E/O/F edit/open/reveal (the request is intercepted, nothing opens)
+//   LAYOUT the 3D layout: stable across a shuffled reload, and adding cards (written into the
+//          env.sh clone, $OKT_KB) moves nothing outside their folders
 //   node tests/ui/keys.mjs [okt-url]
+// A page error, or a console message holding "panicked at" or "already borrowed", fails the run.
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
 const OKT = process.argv[2] || process.env.OKT || 'http://127.0.0.1:6580/';
@@ -13,6 +16,7 @@ const idx = await (await fetch(OKT + 'api/index')).json();
 const dirs = new Set(idx.nodes.filter(n => n.t === 'dir').map(n => n.id));
 const parent = Object.fromEntries(idx.nodes.map(n => [n.id, n.parent]));
 const ancestors = id => { const out = []; for (let p = parent[id]; p && p !== '.'; p = parent[p]) out.push(p); return out; };
+const kind = Object.fromEntries(idx.nodes.map(n => [n.id, n.t]));
 const files = idx.nodes.filter(n => n.t === 'file');
 // the deepest file, to walk up from; a folder with a subfolder, to fold; the most connected
 // markdown file, to walk the graph from and to read
@@ -26,9 +30,12 @@ const word = hub.split('/').pop().replace(/\.md$/, '').split(/[_-]/)[0];
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 }, permissions: ['clipboard-read', 'clipboard-write'] });
+// window.__oktPos, installed empty: the client fills it with {id: [x, y, z]} on every layout build
+await ctx.addInitScript(() => { window.__oktPos = {}; });
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', e => errors.push(e.message));
+page.on('console', m => { const t = m.text(); if (t.includes('panicked at') || t.includes('already borrowed')) errors.push('console: ' + t); });
 const opened = [];
 await page.route('**/api/open', route => { opened.push(JSON.parse(route.request().postData() || '{}')); route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' }); });
 const go = async hash => { await page.evaluate(h => { location.hash = h; }, hash); await page.waitForTimeout(700); };
@@ -180,6 +187,73 @@ check('n moves to the next match', st.sel !== first.sel || st.cur > first.cur, {
 await key('N', 900);
 st = await state();
 check('N moves back', st.sel === first.sel && st.cur === first.cur, { first, now: { sel: st.sel, cur: st.cur } });
+
+// ---- LAYOUT ---------------------------------------------------------------------------------
+const gattr = name => page.evaluate(n => document.getElementById('graph').getAttribute(n), name);
+const positions = () => page.evaluate(() => window.__oktPos);
+// every entry of `before` (but those `skip` names) present in `after` with bitwise-equal coordinates
+const samePos = (before, after, skip = () => false) => {
+  const moved = [];
+  let checked = 0;
+  for (const [id, p] of Object.entries(before || {})) {
+    if (skip(id)) continue;
+    checked++;
+    const q = (after || {})[id];
+    if (!q || q.length !== 3 || !p.every((c, i) => Object.is(c, q[i]))) moved.push(id);
+  }
+  return { checked, moved: moved.slice(0, 5), nmoved: moved.length };
+};
+check('layout publishes the card total', +(await gattr('data-total')) === files.length, { total: await gattr('data-total'), files: files.length });
+
+const lay0 = await gattr('data-layout');
+const pos0 = await positions();
+let seed = 20261108;
+const rnd = () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+let shuffled = 0;
+// the context, not the page, so a service-worker-controlled reload is routed too
+await ctx.route('**/api/index', async route => {
+  const r = await route.fetch();
+  const j = await r.json();
+  const ids = j.nodes.map(n => n.id).join('\n');
+  shuffle(j.nodes);
+  shuffle(j.edges);
+  if (j.nodes.map(n => n.id).join('\n') !== ids) shuffled++;
+  await route.fulfill({ response: r, json: j });
+});
+await page.reload({ waitUntil: 'load' });
+await page.waitForFunction(() => document.getElementById('graph')?.getAttribute('data-layout') && Object.keys(window.__oktPos || {}).length > 0, null, { timeout: 30000 }).catch(() => {});
+const lay1 = await gattr('data-layout');
+const pos1 = await positions();
+await ctx.unroute('**/api/index');
+const same1 = samePos(pos0, pos1);
+check('layout is stable across a shuffled reload',
+  shuffled > 0 && !!lay0 && lay0 === lay1 && same1.checked > 0 && same1.nmoved === 0 && Object.keys(pos0 || {}).length === Object.keys(pos1 || {}).length,
+  { shuffled, lay0, lay1, ...same1 });
+
+// probe cards go into the env.sh clone only, never a real KB
+const kb = process.env.OKT_KB || '';
+const probeDir = dirs.has(parent[hub]) ? parent[hub] : parent[deep];
+// folder ids end in '/', so a folder id is also its path prefix
+const probes = [`${probeDir.replace(/\/?$/, '/')}zz-probe.md`, 'zz-probe-region/probe.md'];
+if (!/\/okt-env\.[^/]+\/kb$/.test(kb)) {
+  check('adding a card moves nothing outside its folder', false, { error: 'OKT_KB is not the tests/env.sh clone', kb });
+} else {
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const posA = await positions();
+  const totalA = +(await gattr('data-total'));
+  writeFileSync(`${kb}/${probes[0]}`, '# probe\n');
+  mkdirSync(`${kb}/zz-probe-region`, { recursive: true });
+  writeFileSync(`${kb}/${probes[1]}`, '# probe\n');
+  await page.waitForFunction(t => +document.getElementById('graph').getAttribute('data-total') === t, totalA + 2, { timeout: 30000 }).catch(() => {});
+  const posB = await positions();
+  const totalB = +(await gattr('data-total'));
+  const inProbed = id => kind[id] === 'file' && (parent[id] === probeDir || parent[id] === 'zz-probe-region/');
+  const sameB = samePos(posA, posB, inProbed);
+  check('adding a card moves nothing outside its folder',
+    totalB === totalA + 2 && probes.every(p => posB && posB[p]) && sameB.checked > 0 && sameB.nmoved === 0,
+    { probeDir, totalA, totalB, probes: probes.map(p => !!(posB && posB[p])), ...sameB });
+}
 
 if (errors.length) { fails++; console.log('page errors:', errors.slice(0, 5).join(' | ')); }
 console.log(fails ? `${fails} failed` : 'all passed');

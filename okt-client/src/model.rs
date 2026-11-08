@@ -63,6 +63,9 @@ pub struct Node {
     pub words: Option<f64>,
     pub aliases: Option<Vec<String>>,
     pub c: Option<f64>,
+    /// first-commit time (seconds), following renames; absent while uncommitted
+    #[serde(default)]
+    pub ft: Option<f64>,
     pub lt: Option<f64>,
     pub link: Option<String>,
 }

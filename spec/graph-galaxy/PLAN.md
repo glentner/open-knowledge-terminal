@@ -50,18 +50,25 @@ As in [03](research/03-layout.md), with these settled values:
   under X. A folder with no committed file has birth +∞, so it sorts after every committed sibling,
   and ties are broken by path (GOAL Clarification on R10, 2026-11-08).
 - **Regions:** placed greedily in key order on a 256-point Fibonacci lattice, at `R_GAL = 900`. The
-  first takes slot `fnv % 256`; each later one takes the slot farthest from those already taken,
-  compared by dot product.
+  surfaces' slot is taken first (below), so every region, the oldest included, takes the free slot
+  farthest from those already taken, compared by dot product. The first-slot rule survives on the cap
+  lattices: a folder's oldest child takes slot `fnv % 48`. (Amended in build P1, 2026-11-08: the oldest
+  region took `fnv % 256` before the surfaces' slot was reserved.)
 - **Subfolders:** a 48-point cap lattice around the parent axis, with half-angle `55°·0.6^(d−2)`.
   Distance from the region core is `Σ Δ_k`, with `Δ = [90, 70, 56, 46, 40, 36, 33, 30…]`.
 - **Cards:** seeded by the path hash inside a cloud of radius `7·∛n + 10`, with `index.md` pinned at
   the folder anchor. 16 Jacobi relaxation passes run within the folder only, at minimum spacing 10.
 - **Root cards:** at the galaxy centre.
-- **Surfaces:** pseudo-region `@`, with birth +∞, pure hash positions and no relaxation.
+- **Surfaces:** pseudo-region `@`. Its slot is reserved on the region lattice before any region
+  (slot `fnv("@") % 256`), whether or not a surface exists. Surfaces sit at pure hash positions
+  within a fixed radius of 60 around its core, with no relaxation, so a new surface moves nothing
+  else. (Amended in build P1, 2026-11-08: with birth +∞ the `@` pseudo-region sorted among the
+  uncommitted regions by path, so a new uncommitted region whose name sorts before `@`, a digit
+  for one, moved the surfaces, and the first surface moved every uncommitted region after it.)
 - **No edge input:** the layout takes none (enforced by its signature, and a comment says why).
 - **Determinism:** FNV-1a 64 plus splitmix64; sorted `Vec`/`BTreeMap` only, never a `HashMap`
   iteration. Collapse never moves positions.
-- **Output:** `Space { pos: Vec<[f64;3]>, folder: frame per dir (anchor, axis, depth, core), region
+- **Output:** `Space { pos: Vec<[f64;3]>, frame: per dir (anchor, axis, depth, core), region
   of each node, bounding radius per region and for the galaxy }`. `G` keeps it in an `Rc`.
 - **Layout hash:** FNV-1a over positions quantised to 1e-6, computed once per build. It is published
   as `data-layout`.
