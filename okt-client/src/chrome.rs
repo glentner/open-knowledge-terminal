@@ -301,7 +301,7 @@ pub fn render_settings() {
         )
     };
     let html = format!(
-        "<h4>THEME</h4><div class=\"row\">{}</div>\n    <h4>ACCENT</h4><div class=\"row\">{swatches}</div>\n    <div class=\"row\" style=\"margin-top:6px\"><input type=\"color\" id=\"acpick\" value=\"{}\"><input class=\"hex\" id=\"achex\" value=\"{}\" spellcheck=\"false\"><span class=\"note\" style=\"margin:0\">{}</span></div>\n    <h4>READER FONT</h4><div class=\"row\">{}</div>\n    <h4>GRAPH</h4><div class=\"row\"><span class=\"note\" style=\"margin:0\">collapse folders over</span><input class=\"hex\" id=\"colN\" style=\"width:54px\" value=\"{}\"><span class=\"note\" style=\"margin:0\">files</span><button class=\"opt\" data-reset=\"1\">RESET EXPANSIONS</button></div>\n    <h4>DISPLAY</h4><div class=\"row\"><button class=\"opt{}\" data-ticker=\"1\">COMMIT TICKER</button><button class=\"opt{}\" data-labels=\"1\">ALL LABELS</button>{}</div>\n    <h4>APP</h4><div class=\"row\">{app_row}</div>\n    <div class=\"note\">{} {} · editor: {} · read-only</div>",
+        "<h4>THEME</h4><div class=\"row\">{}</div>\n    <h4>ACCENT</h4><div class=\"row\">{swatches}</div>\n    <div class=\"row\" style=\"margin-top:6px\"><input type=\"color\" id=\"acpick\" value=\"{}\"><input class=\"hex\" id=\"achex\" value=\"{}\" spellcheck=\"false\"><span class=\"note\" style=\"margin:0\">{}</span></div>\n    <h4>READER FONT</h4><div class=\"row\">{}</div>\n    <h4>GRAPH</h4><div class=\"row\"><span class=\"note\" style=\"margin:0\">collapse folders over</span><input class=\"hex\" id=\"colN\" style=\"width:54px\" value=\"{}\"><span class=\"note\" style=\"margin:0\">files</span><button class=\"opt\" data-reset=\"1\">RESET EXPANSIONS</button></div>\n    <h4>DISPLAY</h4><div class=\"row\"><button class=\"opt{}\" data-ticker=\"1\">COMMIT TICKER</button><button class=\"opt{}\" data-showall=\"1\">SHOW ALL</button>{}</div>\n    <h4>APP</h4><div class=\"row\">{app_row}</div>\n    <div class=\"note\">{} {} · editor: {} · read-only</div>",
         opt(&["terminal", "dark", "light"], t, "theme"),
         esc(&c.accent),
         esc(&c.accent),
@@ -313,7 +313,7 @@ pub fn render_settings() {
         opt(&["mono", "sans", "serif"], &rd, "reader"),
         state::collapse_n(),
         if c.ticker { " on" } else { "" },
-        if c.labels { " on" } else { "" },
+        if c.show_all { " on" } else { "" },
         if b.watch {
             format!(
                 "<button class=\"opt{}\" data-pause=\"1\">PAUSE WATCH</button>",
@@ -378,8 +378,8 @@ pub fn wire_settings() {
             theme::apply_theme();
             render_ticker();
         }
-        if dom::data(&b, "labels").is_some() {
-            graph::toggle_labels();
+        if dom::data(&b, "showall").is_some() {
+            graph::toggle_show_all();
         }
         if dom::data(&b, "reset").is_some() {
             cfg_mut().collapsed.clear();
@@ -527,7 +527,7 @@ pub fn show_help() {
     dom::set_html(
         &el,
         &format!(
-            "<div class=\"helpbox\"><h3>OK TERMINAL · HELP</h3>\n    <div><h4>KEYS</h4><dl>{kd}</dl>\n    <h4>GRAPH</h4><dl><dt>click</dt><dd>select a node; its links light up</dd><dt>double-click</dt><dd>expand or collapse a folder; empty space fits the whole graph</dd><dt>drag</dt><dd>orbit the camera</dd><dt>wheel, pinch</dt><dd>move the camera closer or farther</dd><dt>accent lines</dt><dd>links out; pale lines are links in</dd><dt>rings</dt><dd>records and external systems</dd></dl>\n    <h4>PINS</h4><dl>{pins}</dl></div>\n    <div><h4>COMMANDS</h4><dl>{cd}</dl></div>\n    <div class=\"full\">Anything else you type opens the best-matching file or folder; a commit hash opens that commit; if nothing matches it runs FIND. The terminal is read-only; EDIT, OPEN and REVEAL hand the file to your apps.</div></div>"
+            "<div class=\"helpbox\"><h3>OK TERMINAL · HELP</h3>\n    <div><h4>KEYS</h4><dl>{kd}</dl>\n    <h4>GRAPH</h4><dl><dt>click</dt><dd>select a node; its links light up; a region selects its folder</dd><dt>scales</dt><dd>nothing selected shows the galaxy: one glyph per region, bundles between them; a folder brings its region to the pane, the other regions on the rim; zooming crosses between them</dd><dt>double-click</dt><dd>expand or collapse a folder; empty space fits the whole graph</dd><dt>drag</dt><dd>orbit the camera</dd><dt>wheel, pinch</dt><dd>move the camera closer or farther, across scales</dd><dt>∗</dt><dd>show all: every card and link</dd><dt>accent lines</dt><dd>links out; pale lines are links in</dd><dt>rings</dt><dd>records and external systems</dd></dl>\n    <h4>PINS</h4><dl>{pins}</dl></div>\n    <div><h4>COMMANDS</h4><dl>{cd}</dl></div>\n    <div class=\"full\">Anything else you type opens the best-matching file or folder; a commit hash opens that commit; if nothing matches it runs FIND. The terminal is read-only; EDIT, OPEN and REVEAL hand the file to your apps.</div></div>"
         ),
     );
     dom::set_hidden(&el, false);

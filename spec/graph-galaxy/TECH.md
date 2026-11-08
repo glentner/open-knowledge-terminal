@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feat/graph-galaxy
 base: main
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-08'
 phases:
 - id: P1
@@ -34,7 +34,7 @@ phases:
   verify: sh spec/graph-galaxy/verify/gate.sh P2
 - id: P3
   name: Galaxy and system scales, show all
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -365,16 +365,16 @@ depth cues, under a spherical camera.
 - Zoom crosses scales without touching the selection.
 - "Show all" replaces "all labels" and draws every card and edge.
 
-- [ ] `graph/vis.rs` (pure): `ix`, `adj`, `region` per node (root `.` and surfaces `@` as
+- [x] `graph/vis.rs` (pure): `ix`, `adj`, `region` per node (root `.` and surfaces `@` as
       pseudo-regions, row D11), region-pair link counts summing `n`, bundle weights. Tests:
   - `region_of_nodes`: root, surface and nested cards.
   - `pair_counts`: sums of `n` keyed `(min, max)`, with root and surfaces excluded.
   - `bundle_weight`: rises with the count.
-- [ ] `graph/cam.rs`: `classify` and `nearest_to_centre`. Tests:
+- [x] `graph/cam.rs`: `classify` and `nearest_to_centre`. Tests:
   - `classify_hysteresis`: no flip-flop at ±10% around a band; respects the innermost cap.
   - `nearest_region_front_first`: a region behind the camera loses to any in front; ties go to
     count, then name.
-- [ ] `graph.rs`:
+- [x] `graph.rs`:
   - **Scale:** the scale state of PLAN § 2.3 (from the move kind after a solve, from `classify` on
     zoom input) and the active region. Zoom-in at galaxy picks the in-front region nearest the
     centre; zoom-out past the band eases the target to the origin, and wheel input adjusts that ease
@@ -388,19 +388,44 @@ depth cues, under a spherical camera.
     is drawn, every other card is hidden.
   - **Hooks:** `data-scale`, `data-region`, `data-regions`, `data-rim`, `data-bundles`, `data-edges`,
     `data-dist-galaxy`.
-- [ ] `graph/overlay.rs`: region names at glyphs and rim glyphs; no card labels at galaxy scale.
-- [ ] Show all (rows D2, D4):
+- [x] `graph/overlay.rs`: region names at glyphs and rim glyphs; no card labels at galaxy scale.
+- [x] Show all (rows D2, D4):
   - `state.rs`: `Settings.labels` becomes `Settings.show_all`, under the key `showAll`, in load and
     save. An old `labels` key falls into `extra`.
   - `graph::toggle_labels` becomes `toggle_show_all`. The `.gtools` button becomes `data-z="all"`,
     and the `chrome.rs` DISPLAY row says SHOW ALL.
   - Show all draws every card and every link edge at true positions, overriding collapse (row D12).
-- [ ] `app.css`: glyph, bundle and rim tokens; the region-name overlay rule.
-- [ ] `tests/ui/keys.mjs`: the P3 rows.
+- [x] `app.css`: glyph, bundle and rim tokens; the region-name overlay rule.
+- [x] `tests/ui/keys.mjs`: the P3 rows.
+- *Amended in build (2026-11-08):*
+  - Glyphs are drawn by the GL, not the overlay: one screen-space "mark" program (a capsule per
+    instance, a disc when its two ends meet) draws region halos, rim discs and rings, the root and
+    `@` glyphs, subfolder halos, and the lines out to the rim, a few dozen uploaded per frame. The
+    overlay draws only the region names. Halos are an even glow with a soft edge (flat to 70% of
+    the radius), so a region reads as one cloud even where its own cards cover the middle.
+  - Bundles are tessellated into extra texels after the nodes (12 segments each) and drawn as edges
+    of their own group; one uniform fades them as the rim weight rises, so they hand over to the
+    rim lines across the band. The rim weight eases with the camera move that changes the scale.
+  - The rim runs `--graph-rim-inset` inside the pane, and further in where the toolbar and the
+    legend are (their rects are read on resize and build), so no rim glyph sits under them.
+    `cam::rim_point` is pure and has its own test, `rim_points_hug_the_edge`.
+  - `fit()`, a folder selection and a zoom crossing are `Move::Cross` eases: each moves the target
+    across the system/galaxy band, so a zoom during one moves both of its ends instead of
+    stranding the target. Zooming in at galaxy eases onto the region at the lesser of the asked
+    distance and the region's fit.
+  - `update()` follows a selection change: nothing selected (or the root) eases to the galaxy fit,
+    a folder fits its region. So a graph click on a region glyph or a folder reaches system scale
+    while `nav.rs` is untouched; `nav`'s `focus_node` for a folder repeats the same fit. A card's
+    own move stays `focus_node`'s until P4.
+  - Region glyphs are pickable (a click selects the region's folder); the root glyph selects the
+    root. Until P4 the link edges drawn without show all are the selection's own whose other end is
+    drawn. Show all draws no bundles: every link edge is drawn instead.
+  - `Cargo.toml` takes `TextMetrics` (the overlay measures the names it places). The `?` GRAPH list
+    gains the scales and the show-all button.
 - **Verify:** `sh spec/graph-galaxy/verify/gate.sh P3`.
 - **Touches:** `okt-client/src/graph.rs`, `okt-client/src/graph/{vis,cam,overlay,gl}.rs`,
   `okt-client/src/state.rs`, `okt-client/src/chrome.rs`, `okt-client/static/{app.css,index.html}`,
-  `tests/ui/keys.mjs`.
+  `okt-client/Cargo.toml`, `tests/ui/keys.mjs`.
 
 ## Phase P4 — Focus scale and visibility tiers
 **Satisfies:** R3, R8 · **Depends on:** P3

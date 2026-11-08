@@ -9,6 +9,10 @@
 //          leave the layout, the selection and a focused inspector alone, + = - 0 act on the
 //          distance, drag orbits, wheel and pinch zoom, moves ease (and cut under reduced
 //          motion), and the scene comes back after a lost GL context
+//   SCALES nothing selected shows the galaxy (a glyph per region, the bundles, region names only);
+//          a folder brings its region to system scale with the others on the rim; zooming out
+//          crosses focus, system, galaxy and zooming in at galaxy enters the region nearest the
+//          centre, neither touching the selection; show all draws every card and edge
 //   LAYOUT the 3D layout: stable across a shuffled reload, and adding cards (written into the
 //          env.sh clone, $OKT_KB) moves nothing outside their folders
 //   node tests/ui/keys.mjs [okt-url]
@@ -435,8 +439,129 @@ await page.evaluate(() => document.activeElement?.blur());
   }
 }
 
-// ---- LAYOUT ---------------------------------------------------------------------------------
+// ---- SCALES ---------------------------------------------------------------------------------
+// counts come from idx: a region is a top-level folder; the root's cards and the external
+// systems belong to none
 const gattr = name => page.evaluate(n => document.getElementById('graph').getAttribute(n), name);
+const nodeIds = new Set(idx.nodes.map(n => n.id));
+const topDirs = [...dirs].filter(d => parent[d] === '.').sort();
+const topSet = new Set(topDirs);
+const regionOf = id => {
+  if (kind[id] === 'surface' || !id.includes('/')) return null;
+  const r = id.slice(0, id.indexOf('/') + 1);
+  return topSet.has(r) ? r : null;
+};
+const regionCards = {};
+for (const f of files) { const r = regionOf(f.id); if (r) regionCards[r] = (regionCards[r] || 0) + 1; }
+const edgeEnds = idx.edges.map(e => Array.isArray(e) ? [e[0], e[1]] : [e.s, e.t]).filter(([s, t]) => nodeIds.has(s) && nodeIds.has(t));
+const regionPairs = new Set();
+for (const [s, t] of edgeEnds) {
+  const a = regionOf(s), b = regionOf(t);
+  if (a && b && a !== b) regionPairs.add(a < b ? `${a}|${b}` : `${b}|${a}`);
+}
+// a position under the last frame's view-projection: ndc, pane px from the centre, in front
+const projectAll = (view, pts, w, h) => pts.map(p => {
+  const m = view;
+  const x = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
+  const y = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
+  const cw = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+  return { front: cw > 0, nx: x / cw, ny: y / cw, px: Math.hypot(x / cw * w / 2, y / cw * h / 2) };
+});
+const scaleState = async () => {
+  const v = await page.evaluate(() => { const g = document.getElementById('graph'); return ['data-scale', 'data-region', 'data-regions', 'data-rim', 'data-bundles', 'data-drawn', 'data-edges', 'data-dist', 'data-dist-galaxy', 'data-labels', 'data-view', 'data-showall'].map(k => g.getAttribute(k)); });
+  return { scale: v[0], region: v[1], regions: +v[2], rim: +v[3], bundles: +v[4], drawn: +v[5], edges: +v[6], dist: +v[7], galaxy: +v[8], labels: JSON.parse(v[9] || '[]'), view: JSON.parse(v[10] || '[]'), showall: v[11], sel: (await state()).sel };
+};
+{
+  await waits(() => go('#v=graph'));
+  const s0 = await scaleState();
+  check('nothing selected shows galaxy scale',
+    s0.sel === '' && s0.scale === 'galaxy' && s0.drawn === 0 && s0.galaxy > 0 && Math.abs(s0.dist / s0.galaxy - 1) <= 0.02,
+    { sel: s0.sel, scale: s0.scale, drawn: s0.drawn, dist: s0.dist, galaxy: s0.galaxy });
+  check('galaxy draws one cluster per region and the bundles',
+    topDirs.length > 1 && s0.regions === topDirs.length && s0.bundles === regionPairs.size,
+    { regions: s0.regions, topDirs: topDirs.length, bundles: s0.bundles, pairs: regionPairs.size });
+  check('galaxy labels region names only',
+    s0.labels.length > 0 && s0.labels.every(l => l[4] === 'region'),
+    { labels: s0.labels.slice(0, 4), n: s0.labels.length });
+}
+{
+  // a subfolder of the region with the most cards
+  const big = [...topDirs].sort((a, b) => (regionCards[b] || 0) - (regionCards[a] || 0)).find(r => [...dirs].some(d => parent[d] === r));
+  const sub = [...dirs].filter(d => parent[d] === big).sort()[0];
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(sub)));
+  const s1 = await scaleState();
+  const box = await page.locator('#graph').boundingBox();
+  const pos = await page.evaluate(() => window.__oktPos);
+  const members = Object.keys(pos || {}).filter(id => id.startsWith(big));
+  const pr = projectAll(s1.view, members.map(id => pos[id]), box.width, box.height);
+  const extent = Math.max(0, ...pr.map(p => Math.max(Math.abs(p.nx), Math.abs(p.ny))));
+  check('a folder selects system scale on its region',
+    s1.sel === sub && s1.scale === 'system' && s1.region === big && members.length > 1 && pr.every(p => p.front) && extent >= 0.6 && extent <= 0.8,
+    { sub, big, sel: s1.sel, scale: s1.scale, region: s1.region, members: members.length, extent: +extent.toFixed(3) });
+  check('system scale puts the other regions on the rim',
+    s1.regions > 1 && s1.rim === s1.regions - 1,
+    { regions: s1.regions, rim: s1.rim });
+}
+{
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(hub)));
+  const seen = [(await scaleState()).scale];
+  const sels = [(await state()).sel];
+  for (let i = 0; i < 24 && seen[seen.length - 1] !== 'galaxy'; i++) {
+    await waits(() => page.keyboard.press('-'));
+    const s = await scaleState();
+    if (s.scale !== seen[seen.length - 1]) seen.push(s.scale);
+    sels.push(s.sel);
+  }
+  check('zooming out crosses to galaxy and keeps the selection',
+    JSON.stringify(seen) === '["focus","system","galaxy"]' && sels.every(s => s === hub),
+    { seen, sels: [...new Set(sels)] });
+}
+{
+  await waits(() => go('#v=graph'));
+  await waits(() => page.keyboard.press('ArrowRight'));
+  await waits(() => page.keyboard.press('ArrowRight'));
+  await waits(() => page.keyboard.press('PageUp'));
+  const box = await page.locator('#graph').boundingBox();
+  let before = null, s = await scaleState();
+  for (let i = 0; i < 24 && s.scale !== 'system'; i++) {
+    before = s;
+    await waits(() => page.keyboard.press('+'));
+    s = await scaleState();
+  }
+  // the region the test expects, from the view the crossing press was made under
+  let want = null;
+  if (before) {
+    const pos = await page.evaluate(() => window.__oktPos);
+    const pr = projectAll(before.view, topDirs.map(r => pos[r]), box.width, box.height);
+    const cands = topDirs.map((r, k) => ({ r, ...pr[k], cards: regionCards[r] || 0 })).filter(c => c.front);
+    cands.sort((a, b) => (Math.abs(a.px - b.px) > 1e-6 * (1 + a.px) ? a.px - b.px : 0) || b.cards - a.cards || (a.r < b.r ? -1 : 1));
+    want = cands[0]?.r ?? null;
+  }
+  check('zooming in at galaxy enters system scale on the region nearest the centre',
+    s.scale === 'system' && !!want && s.region === want && s.sel === '',
+    { scale: s.scale, region: s.region, want, sel: s.sel });
+}
+{
+  // collapse a folder (space toggles; press again if it opened), then show all at the galaxy fit
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(outer)));
+  await key(' ', 500);
+  if (!/COLLAPSED/i.test((await state()).toast)) await key(' ', 500);
+  const collapsed = /COLLAPSED/i.test((await state()).toast);
+  await waits(() => page.keyboard.press('0'));
+  await page.locator('.gtools [data-z=all]').click();
+  await page.waitForFunction(() => document.getElementById('graph').getAttribute('data-showall') === '1', null, { timeout: 5000 }).catch(() => {});
+  await twoFrames(page);
+  const s2 = await scaleState();
+  check('show all draws every card and every edge',
+    collapsed && s2.showall === '1' && s2.drawn === files.length && s2.edges === edgeEnds.length,
+    { collapsed, showall: s2.showall, drawn: s2.drawn, files: files.length, edges: s2.edges, want: edgeEnds.length });
+  // put things back: show all off, the folder open again
+  await page.locator('.gtools [data-z=all]').click();
+  await page.waitForFunction(() => document.getElementById('graph').getAttribute('data-showall') === '0', null, { timeout: 5000 }).catch(() => {});
+  await key(' ', 500);
+}
+
+// ---- LAYOUT ---------------------------------------------------------------------------------
 const positions = () => page.evaluate(() => window.__oktPos);
 // every entry of `before` (but those `skip` names) present in `after` with bitwise-equal coordinates
 const samePos = (before, after, skip = () => false) => {

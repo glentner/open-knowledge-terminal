@@ -31,5 +31,5 @@ web-sys = { workspace = true, features = [
   "ScrollBehavior", "ScrollToOptions", "CharacterData", "css", "SvgElement", "console",
   "WebGl2RenderingContext", "WebGlProgram", "WebGlShader", "WebGlBuffer", "WebGlUniformLocation",
   "WebGlVertexArrayObject", "WebGlContextAttributes", "WebGlContextEvent", "WebglLoseContext",
-  "WebGlTexture",
+  "WebGlTexture", "TextMetrics",
 ] }

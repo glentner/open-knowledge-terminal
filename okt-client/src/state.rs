@@ -81,7 +81,7 @@ pub struct Settings {
     pub accent: String,
     pub reader: Option<String>,
     pub ticker: bool,
-    pub labels: bool,
+    pub show_all: bool,
     pub insp: f64,
     pub collapsed: IndexMap<String, bool>,
     pub collapse: Option<i64>,
@@ -124,7 +124,7 @@ impl Settings {
             },
             reader: None,
             ticker: true,
-            labels: false,
+            show_all: false,
             insp: 46.0,
             collapsed: IndexMap::new(),
             collapse: None,
@@ -152,7 +152,7 @@ impl Settings {
                 ("reader", Value::String(x)) => s.reader = Some(x.clone()),
                 ("reader", Value::Null) => s.reader = None,
                 ("ticker", Value::Bool(x)) => s.ticker = *x,
-                ("labels", Value::Bool(x)) => s.labels = *x,
+                ("showAll", Value::Bool(x)) => s.show_all = *x,
                 ("insp", Value::Number(x)) => s.insp = x.as_f64().unwrap_or(46.0),
                 ("collapsed", Value::Object(o)) => {
                     s.collapsed = o
@@ -206,7 +206,7 @@ impl Settings {
         m.insert("accent".into(), json!(self.accent));
         m.insert("reader".into(), json!(self.reader));
         m.insert("ticker".into(), json!(self.ticker));
-        m.insert("labels".into(), json!(self.labels));
+        m.insert("showAll".into(), json!(self.show_all));
         m.insert("insp".into(), json!(self.insp));
         m.insert("collapsed".into(), json!(self.collapsed));
         m.insert("collapse".into(), json!(self.collapse));

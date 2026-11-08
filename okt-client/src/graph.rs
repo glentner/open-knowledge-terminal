@@ -4,6 +4,15 @@
 //! the accent) are the colours the renderer paints with, read once per build and on an accent
 //! change.
 //!
+//! The camera works at three scales. At galaxy scale each region (a top-level folder) is one
+//! glyph, a soft halo sized by its card count, and every pair of linked regions one bundle. At
+//! system scale one region is fitted to the pane with its subfolders as glyphs, and the other
+//! regions sit on a rim inside the pane's edge, in their true direction, with the bundles that
+//! reach them. Focus scale is a card and its links. A selection sets the scale (a folder brings
+//! its region to system scale, a card focus, nothing the galaxy); zooming crosses to the
+//! neighbouring scale and never changes the selection. Which cards are drawn (`vis`) is decided
+//! apart from the scale: the selection's region, or every card and link under "show all".
+//!
 //! Frames are drawn on demand. Input handlers never draw: every camera move goes through
 //! `cam_to`, which starts an ease (or cuts, under reduced motion) and schedules a frame. The frame
 //! evaluates the pose, projects and sorts the drawn points, draws, and only then, with no graph
@@ -13,6 +22,7 @@ mod cam;
 mod gl;
 mod overlay;
 mod space;
+mod vis;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -28,7 +38,7 @@ use crate::model::{Idx, Node, edge_group, fam_var, shape_of};
 use crate::state::{self, cfg, is_collapsed};
 use crate::theme;
 use crate::{chrome, insp};
-use cam::{Pane, Pose};
+use cam::{Pane, Pose, Scale};
 
 /// A card's world radius before its links add to it (the layout spaces cards 10 apart).
 const CARD_R: f64 = 2.2;
@@ -42,6 +52,17 @@ pub const TILT_DEG: f64 = 10.0;
 const FOCUS_RADIUS: f64 = 120.0;
 /// Room around fitted cards for their marks, in world units.
 const FIT_PAD: f64 = 12.0;
+/// A region glyph's halo: this world radius plus this much per square root of its cards.
+const GLYPH_R0: f64 = 14.0;
+const GLYPH_K: f64 = 6.0;
+/// A subfolder's glyph at system scale, likewise per square root of its files.
+const SUB_R0: f64 = 6.0;
+const SUB_K: f64 = 3.0;
+/// A glyph's dot at its core, and a rim glyph, in CSS px.
+const DOT_PX: f64 = 2.5;
+const RIM_PX: f64 = 5.0;
+/// Segments per bundle curve.
+const BUNDLE_SEGS: usize = 12;
 
 // ---- collapse: which node stands for each id -------------------------------------------------
 
@@ -195,18 +216,18 @@ struct NodeVis {
     hollow: bool,
     /// world radius: cards grow with their links, folders with their files
     r: f64,
+    /// files under a folder
+    files: f64,
 }
 
 fn vis_of(idx: &Idx, n: &Node) -> NodeVis {
     let fam = n.fam().to_string();
     let shape = shape_of(&fam).unwrap_or("dot");
+    let files = idx.dinfo(&n.id).map(|d| d.files).unwrap_or(0.0);
     let (kind, r) = match n.t.as_str() {
         "root" => (Kind::Root, CARD_R * 3.0),
         "surface" => (Kind::Surf, CARD_R * 2.2),
-        "dir" => {
-            let files = idx.dinfo(&n.id).map(|d| d.files).unwrap_or(0.0);
-            (Kind::Dir, CARD_R * (1.4 + 0.3 * (1.0 + files).ln()))
-        }
+        "dir" => (Kind::Dir, CARD_R * (1.4 + 0.3 * (1.0 + files).ln())),
         _ => {
             let index = n.id == "index.md" || n.id.ends_with("/index.md");
             let r = CARD_R * (1.0 + 0.35 * (1.0 + idx.degree(&n.id)).ln());
@@ -218,6 +239,7 @@ fn vis_of(idx: &Idx, n: &Node) -> NodeVis {
         hollow: kind == Kind::Surf || shape == "hsquare" || shape == "hexo",
         fam,
         r,
+        files,
     }
 }
 
@@ -229,15 +251,25 @@ struct Colors {
     halo: [f32; 4],
     edge: [f32; 4],
     edge_hot: [f32; 4],
+    bundle: [f32; 4],
     fam: HashMap<String, [f32; 4]>,
     /// the accent as CSS, for the overlay's strokes
     accent_css: String,
+    /// a region halo's peak alpha (`--graph-glyph-alpha`)
+    glyph_alpha: f32,
+    /// how far inside the pane's edge the rim runs, CSS px (`--graph-rim-inset`)
+    rim_inset: f64,
+    /// a dark background: halos add light rather than cover
+    dark: bool,
 }
 
 impl Colors {
+    /// Read the graph tokens, and give the overlay its text style.
     fn read(ov: &overlay::Overlay) -> Colors {
         let v = theme::css_var;
+        ov.restyle(&v("--graph-bg"));
         let c = |name: &str| ov.canon(&v(name));
+        let bg = c("--graph-bg");
         let fam = [
             "core",
             "cards",
@@ -251,15 +283,26 @@ impl Colors {
         .iter()
         .map(|f| (f.to_string(), c(&format!("--f-{f}"))))
         .collect();
+        let number = |name: &str, or: f64| {
+            v(name)
+                .trim_end_matches("px")
+                .trim()
+                .parse::<f64>()
+                .unwrap_or(or)
+        };
         Colors {
-            bg: c("--graph-bg"),
+            dark: 0.2126 * bg[0] + 0.7152 * bg[1] + 0.0722 * bg[2] < 0.5,
+            bg,
             fog: c("--graph-fog"),
             accent: c("--accent"),
             halo: c("--graph-halo"),
             edge: c("--graph-edge"),
             edge_hot: c("--edge-hot"),
+            bundle: c("--graph-bundle"),
             fam,
             accent_css: v("--accent"),
+            glyph_alpha: number("--graph-glyph-alpha", 0.3) as f32,
+            rim_inset: number("--graph-rim-inset", 34.0),
         }
     }
     fn fam(&self, f: &str) -> [f32; 4] {
@@ -271,13 +314,19 @@ impl Colors {
     }
 }
 
-/// A camera move in flight, from the pose a frame showed when it started.
+/// A camera move in flight, from the pose a frame showed when it started. The rim weight (0 at
+/// galaxy scale, 1 where other regions sit on the rim) eases with it, so glyphs slide between
+/// their true projection and the rim.
 #[derive(Clone, Copy)]
 struct CamAnim {
     from: Pose,
     to: Pose,
     t0: f64,
     ms: f64,
+    rim0: f64,
+    rim1: f64,
+    /// a move across the system/galaxy band: a zoom adjusts its distance instead of cancelling it
+    cross: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -286,6 +335,24 @@ enum Move {
     Cut,
     /// eased over this many milliseconds (a cut under reduced motion)
     Ease(f64),
+    /// eased like `Ease`, across the system/galaxy band (the target travels between the origin
+    /// and a region): a zoom during it moves both of its ends rather than stranding the target
+    Cross(f64),
+}
+
+/// How far toward the rim the other regions' glyphs sit at a scale.
+fn rim_of(s: Scale) -> f64 {
+    if s == Scale::Galaxy { 0.0 } else { 1.0 }
+}
+
+/// A bundle between two regions, tessellated into texels from `first` on.
+struct Bundle {
+    a: usize,
+    b: usize,
+    first: u32,
+    /// CSS px
+    w: f32,
+    alpha: f32,
 }
 
 /// What a resize re-fits while `autofit` holds: the whole graph, or a set of points.
@@ -320,9 +387,29 @@ pub struct G {
     nodes: Vec<NodeVis>,
     /// every link edge whose two ends are nodes, and whether it reaches an external system
     edges: Vec<(u32, u32, bool)>,
+    /// regions, adjacency and region-pair counts; region indices agree with `space.regions`
+    vis: Rc<vis::Vis>,
+    /// each region's folder node
+    region_node: Vec<Option<usize>>,
+    /// external systems in the index (the `@` glyph shows when there are any)
+    n_surf: usize,
+    bundles: Vec<Bundle>,
+    bundle_pts: Vec<cam::V3>,
     colors: Option<Colors>,
     /// what the GL was last given to draw
     inst: Rc<gl::Instances>,
+    /// the nodes drawn as points, decided when the selection, scale or show all changes
+    drawn: Rc<Vec<u32>>,
+    /// the active region's subfolders, drawn as glyphs
+    subs: Vec<usize>,
+    show_all: bool,
+    scale: Scale,
+    /// the region the camera is at, at system and focus scale
+    region: Option<usize>,
+    /// where the other regions' glyphs sit, 0 (true projection) to 1 (the rim)
+    rim: f64,
+    /// the selection the camera last followed
+    sel_id: Option<String>,
     /// `inst` still has to reach the GL (it had no context when it changed)
     inst_dirty: bool,
     sel: Option<usize>,
@@ -342,6 +429,9 @@ pub struct G {
     h: f64,
     dpr: f64,
     host_rect: (f64, f64, f64, f64),
+    /// the pane chrome the rim keeps clear of: the toolbar's right edge and the legend's height,
+    /// CSS px from the pane's left and bottom edges
+    chrome: (f64, f64),
     raf: i32,
     drag: Option<Drag>,
     built: bool,
@@ -371,17 +461,98 @@ impl G {
     fn dest(&self) -> Pose {
         self.anim.map(|a| a.to).unwrap_or(self.pose)
     }
+    /// The distance a selected card is approached to.
+    fn d_focus(&self) -> f64 {
+        cam::fit_sphere(FOCUS_RADIUS, self.pane())
+    }
+    /// The distance that fits a region whatever the orientation.
+    fn d_system(&self, r: usize) -> f64 {
+        let radius = self.space.regions.get(r).map(|g| g.radius).unwrap_or(0.0);
+        cam::fit_sphere(radius.max(space::DMIN), self.pane())
+    }
+    /// The bands between the scales: around the active region, or a typical region (the
+    /// geometric mean of their fits) when there is none.
+    fn bands(&self) -> cam::Bands {
+        let d_s = match self.region {
+            Some(r) => self.d_system(r),
+            None => {
+                let ls: Vec<f64> = (0..self.space.regions.len())
+                    .filter(|&r| self.vis.is_region(r))
+                    .map(|r| self.d_system(r).ln())
+                    .collect();
+                if ls.is_empty() {
+                    self.d_galaxy() / 3.0
+                } else {
+                    (ls.iter().sum::<f64>() / ls.len() as f64).exp()
+                }
+            }
+        };
+        cam::bands(self.d_focus(), d_s, self.d_galaxy())
+    }
+    /// How far in a zoom may cross: focus when a card is selected in the active region,
+    /// otherwise system.
+    fn innermost(&self) -> Scale {
+        match (self.sel, self.region) {
+            (Some(i), Some(r))
+                if self.scale != Scale::Galaxy
+                    && self.nodes.get(i).is_some_and(|v| v.kind == Kind::File)
+                    && self.vis.region.get(i) == Some(&r) =>
+            {
+                Scale::Focus
+            }
+            _ => Scale::System,
+        }
+    }
+    /// A node's region, when it is a top-level folder's (not the root's cards or a surface).
+    fn region_of(&self, i: usize) -> Option<usize> {
+        self.vis
+            .region
+            .get(i)
+            .copied()
+            .filter(|&r| self.vis.is_region(r))
+    }
+    /// Fit region `r` from `theta`/`psi`: its core as the target, and the distance that fits
+    /// every node in it; also the points fitted, for a resize.
+    fn region_fit(&self, r: usize, theta: f64, psi: f64) -> (cam::V3, f64, Vec<cam::V3>) {
+        let target = self
+            .space
+            .regions
+            .get(r)
+            .map(|g| g.core)
+            .unwrap_or([0.0; 3]);
+        let pts: Vec<cam::V3> = self
+            .vis
+            .region
+            .iter()
+            .zip(&self.space.pos)
+            .filter(|(g, _)| **g == r)
+            .map(|(_, p)| *p)
+            .collect();
+        let d = cam::fit_distance(&pts, target, theta, psi, self.pane(), FIT_PAD, self.d_min());
+        (target, d, pts)
+    }
+    /// Set the scale and the active region; true when either changed.
+    fn set_scale(&mut self, scale: Scale, region: Option<usize>) -> bool {
+        let changed = self.scale != scale || self.region != region;
+        self.scale = scale;
+        self.region = region;
+        changed
+    }
 }
 
 thread_local! {
     static GS: &'static RefCell<G> = Box::leak(Box::new(RefCell::new(G {
         canvas: None, gl: None, ov: None, lay: Rc::new(Layout::default()),
         space: Rc::new(space::Space::default()), ids: Rc::new(vec![]), at: HashMap::new(),
-        nodes: vec![], edges: vec![], colors: None, inst: Rc::new(gl::Instances::default()),
+        nodes: vec![], edges: vec![], vis: Rc::new(vis::Vis::default()), region_node: vec![],
+        n_surf: 0, bundles: vec![], bundle_pts: vec![], colors: None,
+        inst: Rc::new(gl::Instances::default()), drawn: Rc::new(vec![]), subs: vec![],
+        show_all: false, scale: Scale::Galaxy, region: None, rim: 0.0, sel_id: None,
         inst_dirty: false, sel: None,
         pose: Pose { target: [0.0; 3], theta: THETA0, psi: PSI0, ln_d: 8.0 },
         anim: None, autofit: true, fit: Fit::Galaxy, moves: 0, picks: vec![], hover: None,
         cursor: None, flash: vec![], w: 0.0, h: 0.0, dpr: 1.0, host_rect: (0.0, 0.0, 0.0, 0.0),
+        chrome: (0.0, 0.0),
         raf: 0, drag: None, built: false,
     })));
 }
@@ -430,6 +601,25 @@ pub fn build(flash: &[String]) {
             Some((*at.get(&e.s)? as u32, *at.get(&e.t)? as u32, surface))
         })
         .collect();
+    let vnodes: Vec<vis::VNode> = idx
+        .nodes
+        .iter()
+        .map(|n| vis::VNode {
+            id: &n.id,
+            surface: n.t == "surface",
+            file: n.t == "file",
+        })
+        .collect();
+    let vedges: Vec<(usize, usize, f64)> = idx
+        .edges
+        .iter()
+        .filter_map(|e| Some((*at.get(&e.s)?, *at.get(&e.t)?, e.n)))
+        .collect();
+    let order: Vec<String> = sp.regions.iter().map(|r| r.id.clone()).collect();
+    let vis = Rc::new(vis::build(&vnodes, &vedges, &order));
+    let region_node: Vec<Option<usize>> = vis.regions.iter().map(|k| at.get(k).copied()).collect();
+    let n_surf = idx.nodes.iter().filter(|n| n.t == "surface").count();
+    let (bundles, bundle_pts) = tessellate(&vis, &sp, ids.len());
     let now = dom::perf_now();
     let flashed: Vec<(usize, f64)> = flash
         .iter()
@@ -441,12 +631,20 @@ pub fn build(flash: &[String]) {
     };
     {
         let mut gs = g();
+        // the active region keeps its folder across a rebuild, wherever its index moved
+        let active = gs.region.and_then(|r| gs.vis.regions.get(r).cloned());
+        gs.region = active.and_then(|k| vis.regions.iter().position(|x| *x == k));
         gs.lay = lay;
         gs.space = sp.clone();
         gs.ids = Rc::new(ids);
         gs.at = at;
         gs.nodes = nodes;
         gs.edges = edges;
+        gs.vis = vis;
+        gs.region_node = region_node;
+        gs.n_surf = n_surf;
+        gs.bundles = bundles;
+        gs.bundle_pts = bundle_pts;
         if colors.is_some() {
             gs.colors = colors;
         }
@@ -477,6 +675,28 @@ pub fn build(flash: &[String]) {
     update();
     publish_space(&lnodes, &sp, idx.files().count());
     render_legend(&idx);
+    let chrome = chrome_insets();
+    g().chrome = chrome;
+}
+
+/// How far the toolbar reaches in from the pane's left edge, and the legend up from its bottom
+/// (zero for either when it is not shown), so rim glyphs keep clear of them.
+fn chrome_insets() -> (f64, f64) {
+    let Some(host) = dom::try_id("v-graph") else {
+        return (0.0, 0.0);
+    };
+    let hr = host.get_bounding_client_rect();
+    let left = dom::q(".gtools")
+        .map(|t| t.get_bounding_client_rect())
+        .filter(|r| r.width() > 0.0)
+        .map(|r| r.right() - hr.left())
+        .unwrap_or(0.0);
+    let bottom = dom::try_id("glegend")
+        .map(|l| l.get_bounding_client_rect())
+        .filter(|r| r.width() > 0.0)
+        .map(|r| hr.bottom() - r.top())
+        .unwrap_or(0.0);
+    (left.max(0.0), bottom.max(0.0))
 }
 
 /// Publish the 3D layout for tests: `#graph[data-layout]` (its fingerprint) and
@@ -489,22 +709,96 @@ fn publish_space(nodes: &[space::LNode], sp: &space::Space, total: usize) {
     }
 }
 
-/// What the GL draws for the current selection: every node, the selection haloed, and every link
-/// edge, the selection's own last (on top) with out-links in the accent; links to external
-/// systems are fainter.
-fn instances(gs: &G) -> gl::Instances {
+/// One quadratic Bézier per linked region pair, from core to core with its control point pulled
+/// halfway toward the origin, as `BUNDLE_SEGS + 1` points placed after the `first` texels.
+fn tessellate(vis: &vis::Vis, sp: &space::Space, first: usize) -> (Vec<Bundle>, Vec<cam::V3>) {
+    let n_max = vis.pairs.iter().map(|p| p.n).fold(0.0, f64::max);
+    let mut bundles = Vec::with_capacity(vis.pairs.len());
+    let mut pts = Vec::with_capacity(vis.pairs.len() * (BUNDLE_SEGS + 1));
+    for p in &vis.pairs {
+        let (Some(a), Some(b)) = (sp.regions.get(p.a), sp.regions.get(p.b)) else {
+            continue;
+        };
+        let (a0, b0) = (a.core, b.core);
+        let c = [
+            (a0[0] + b0[0]) * 0.25,
+            (a0[1] + b0[1]) * 0.25,
+            (a0[2] + b0[2]) * 0.25,
+        ];
+        let at = (first + pts.len()) as u32;
+        for k in 0..=BUNDLE_SEGS {
+            let t = k as f64 / BUNDLE_SEGS as f64;
+            let (u, m, v) = ((1.0 - t) * (1.0 - t), 2.0 * (1.0 - t) * t, t * t);
+            pts.push([
+                u * a0[0] + m * c[0] + v * b0[0],
+                u * a0[1] + m * c[1] + v * b0[1],
+                u * a0[2] + m * c[2] + v * b0[2],
+            ]);
+        }
+        let (w, alpha) = vis::bundle_weight(p.n, n_max);
+        bundles.push(Bundle {
+            a: p.a,
+            b: p.b,
+            first: at,
+            w: w as f32,
+            alpha: alpha as f32,
+        });
+    }
+    (bundles, pts)
+}
+
+/// What is drawn, decided when the selection, the scale or show all changes (never per frame):
+/// - show all: every card and every link edge, the selection's own on top;
+/// - otherwise the selection's region (its cards and folders), the active region's subfolders
+///   at system and focus scale, and the selection's links whose other end is drawn too;
+/// - the bundles between regions, unless show all.
+///
+/// Returns what the GL uploads, the nodes drawn as points, and the active region's subfolders.
+fn instances(gs: &G) -> (gl::Instances, Vec<u32>, Vec<usize>) {
     let grey = [0.55, 0.55, 0.55, 1.0];
-    let (accent, halo, edge, edge_hot) = gs
+    let (accent, halo, edge, edge_hot, bundle) = gs
         .colors
         .as_ref()
-        .map(|c| (c.accent, c.halo, c.edge, c.edge_hot))
-        .unwrap_or((grey, grey, [0.5, 0.5, 0.5, 0.2], [0.8, 0.8, 0.8, 0.6]));
+        .map(|c| (c.accent, c.halo, c.edge, c.edge_hot, c.bundle))
+        .unwrap_or((grey, grey, [0.5, 0.5, 0.5, 0.2], [0.8, 0.8, 0.8, 0.6], grey));
     let n = gs.nodes.len();
+    let sel = gs.sel;
+    let rf = sel.and_then(|i| gs.vis.region.get(i).copied());
+    let active = if gs.scale == Scale::Galaxy {
+        None
+    } else {
+        gs.region
+    };
+    let on: Vec<bool> = (0..n)
+        .map(|i| {
+            let k = gs.nodes[i].kind;
+            let r = gs.vis.region.get(i).copied();
+            k != Kind::Root
+                && (gs.show_all
+                    || r == rf
+                    || (k == Kind::Dir && r.is_some() && r == active)
+                    || Some(i) == sel)
+        })
+        .collect();
+    let drawn: Vec<u32> = (0..n).filter(|&i| on[i]).map(|i| i as u32).collect();
+    let subs: Vec<usize> = match active {
+        Some(r) => (0..n)
+            .filter(|&i| {
+                gs.nodes[i].kind == Kind::Dir
+                    && gs.vis.region.get(i) == Some(&r)
+                    && gs.region_node.get(r).copied().flatten() != Some(i)
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    let extra = gs.bundle_pts.len();
     let mut inst = gl::Instances {
-        pos: Vec::with_capacity(n * 4),
-        col: Vec::with_capacity(n * 4),
+        pos: Vec::with_capacity((n + extra) * 4),
+        col: Vec::with_capacity((n + extra) * 4),
         ends: Vec::with_capacity(gs.edges.len() * 2),
-        ecol: Vec::with_capacity(gs.edges.len() * 5),
+        ecol: Vec::with_capacity(gs.edges.len() * 6),
+        n_links: 0,
+        n_bundles: 0,
     };
     for (i, (p, v)) in gs.space.pos.iter().zip(&gs.nodes).enumerate() {
         inst.pos
@@ -523,23 +817,51 @@ fn instances(gs: &G) -> gl::Instances {
         };
         inst.col.extend([rgb[0], rgb[1], rgb[2], st]);
     }
+    for p in &gs.bundle_pts {
+        inst.pos
+            .extend([p[0] as f32, p[1] as f32, p[2] as f32, 0.0]);
+        inst.col.extend([0.0; 4]);
+    }
+    let link = gl::group::LINK;
     let mut hot: Vec<(u32, u32, [f32; 4], f32)> = Vec::new();
     for &(s, t, surface) in &gs.edges {
-        if Some(s as usize) == gs.sel {
+        let (si, ti) = (s as usize, t as usize);
+        let touches = Some(si) == sel || Some(ti) == sel;
+        if !gs.show_all && !(touches && on[si] && on[ti]) {
+            continue;
+        }
+        if Some(si) == sel {
             hot.push((s, t, [accent[0], accent[1], accent[2], 0.95], 1.6));
-        } else if Some(t as usize) == gs.sel {
+        } else if Some(ti) == sel {
             hot.push((s, t, edge_hot, 1.4));
         } else {
             let a = if surface { edge[3] * 0.6 } else { edge[3] };
             inst.ends.extend([s, t]);
-            inst.ecol.extend([edge[0], edge[1], edge[2], a, 1.0]);
+            inst.ecol.extend([edge[0], edge[1], edge[2], a, 1.0, link]);
         }
     }
     for (s, t, c, w) in hot {
         inst.ends.extend([s, t]);
-        inst.ecol.extend([c[0], c[1], c[2], c[3], w]);
+        inst.ecol.extend([c[0], c[1], c[2], c[3], w, link]);
     }
-    inst
+    inst.n_links = inst.ends.len() / 2;
+    if !gs.show_all {
+        for b in &gs.bundles {
+            for k in 0..BUNDLE_SEGS as u32 {
+                inst.ends.extend([b.first + k, b.first + k + 1]);
+                inst.ecol.extend([
+                    bundle[0],
+                    bundle[1],
+                    bundle[2],
+                    b.alpha,
+                    b.w,
+                    gl::group::BUNDLE,
+                ]);
+            }
+        }
+        inst.n_bundles = gs.bundles.len();
+    }
+    (inst, drawn, subs)
 }
 
 /// Hand the current instances to the GL, and to `window.__oktPos` when a test asked for them.
@@ -575,7 +897,7 @@ fn render_legend(idx: &Idx) {
         ));
     }
     html.push_str(
-        "<span style=\"color:var(--faint)\">drag to orbit · wheel to zoom · 0 fits</span>",
+        "<span style=\"color:var(--faint)\">drag to orbit · wheel to zoom across scales · 0 fits</span>",
     );
     dom::set_html(&dom::id("glegend"), &html);
 }
@@ -615,19 +937,24 @@ fn cam_to(to: Pose, mv: Move) {
         let mut gs = g();
         let to = cam::clamp(&to, gs.d_min(), 1.5 * gs.d_galaxy());
         gs.moves += 1;
+        let rim1 = rim_of(gs.scale);
         match mv {
-            Move::Ease(ms) if !reduced && gs.w > 0.0 => {
-                let from = gs.pose;
+            Move::Ease(ms) | Move::Cross(ms) if !reduced && gs.w > 0.0 => {
+                let (from, rim0) = (gs.pose, gs.rim);
                 gs.anim = Some(CamAnim {
                     from,
                     to,
                     t0: dom::perf_now(),
                     ms,
+                    rim0,
+                    rim1,
+                    cross: matches!(mv, Move::Cross(_)),
                 });
             }
             _ => {
                 gs.pose = to;
                 gs.anim = None;
+                gs.rim = rim1;
             }
         }
         gs.moves
@@ -638,35 +965,152 @@ fn cam_to(to: Pose, mv: Move) {
     schedule();
 }
 
-/// `0`, the fit button and a double-click on empty space: the whole graph, from where the camera
-/// looks now. The selection is kept.
+/// `0`, the fit button, a double-click on empty space, and an empty selection: the whole graph at
+/// galaxy scale, from where the camera looks now. The selection is kept.
 pub fn fit() {
-    let to = {
+    let (to, rescaled) = {
         let mut gs = g();
         gs.autofit = true;
         gs.fit = Fit::Galaxy;
-        Pose {
+        let rescaled = gs.set_scale(Scale::Galaxy, None);
+        let to = Pose {
             target: [0.0; 3],
             ln_d: gs.d_galaxy().ln(),
             ..gs.dest()
-        }
+        };
+        (to, rescaled)
     };
-    cam_to(to, Move::Ease(cam::EASE_MS));
+    cam_to(to, Move::Cross(cam::EASE_MS));
+    if rescaled {
+        retier();
+    }
 }
 
 /// `+`/`=` (f > 1, closer) and `-` (f < 1, farther): the camera distance, about the target.
 /// Repeated presses chain from where the last one was going.
 pub fn zoom_by(f: f64) {
-    let to = {
+    zoom(-f.ln(), true);
+}
+
+/// A user zoom by `dl` in `ln d`: the wheel or a pinch (from where the camera is, as a cut) or a
+/// key (`keyed`: from where it is going, eased). Only user zooms consult the bands, and crossing
+/// one changes the scale, never the selection:
+/// - out past system: the target eases to the origin (galaxy);
+/// - in at galaxy: the region nearest the pane centre becomes the active region, and the camera
+///   eases onto it (system);
+/// - in at system, with a card selected in the active region: back onto the card (focus);
+/// - out from focus: system, about the same target.
+///
+/// A zoom during a band-crossing ease moves both of its ends instead of cancelling it.
+fn zoom(dl: f64, keyed: bool) {
+    enum Act {
+        Adjusted,
+        Plain(Pose),
+        Crossed(Pose, Move),
+    }
+    let act = {
         let mut gs = g();
         gs.autofit = false;
-        let p = gs.dest();
-        Pose {
-            ln_d: p.ln_d - f.ln(),
-            ..p
+        let (lo, hi) = (gs.d_min().ln(), (1.5 * gs.d_galaxy()).ln());
+        let crossing = gs.anim.filter(|a| a.cross);
+        let (base, ln_d) = match crossing {
+            Some(mut a) => {
+                a.from.ln_d = (a.from.ln_d + dl).clamp(lo, hi);
+                a.to.ln_d = (a.to.ln_d + dl).clamp(lo, hi);
+                gs.anim = Some(a);
+                (a.to, a.to.ln_d)
+            }
+            None => {
+                let p = if keyed { gs.dest() } else { gs.pose };
+                (p, (p.ln_d + dl).clamp(lo, hi))
+            }
+        };
+        let prev = gs.scale;
+        let next = cam::classify(ln_d.exp(), &gs.bands(), prev, gs.innermost());
+        let landing = match next {
+            _ if next == prev => None,
+            Scale::Galaxy => {
+                gs.set_scale(Scale::Galaxy, None);
+                Some((
+                    Pose {
+                        target: [0.0; 3],
+                        ln_d,
+                        ..base
+                    },
+                    Move::Cross(cam::EASE_MS),
+                ))
+            }
+            Scale::System if prev == Scale::Galaxy => {
+                let cands: Vec<(usize, cam::V3)> = (0..gs.space.regions.len())
+                    .filter(|&r| gs.vis.is_region(r))
+                    .map(|r| (r, gs.space.regions[r].core))
+                    .collect();
+                let pick = {
+                    let c: Vec<cam::Candidate> = cands
+                        .iter()
+                        .map(|&(r, core)| cam::Candidate {
+                            core,
+                            cards: gs.vis.cards.get(r).copied().unwrap_or(0),
+                            name: &gs.vis.regions[r],
+                        })
+                        .collect();
+                    cam::nearest_to_centre(&c, &gs.pose, gs.pane())
+                };
+                pick.map(|k| {
+                    let r = cands[k].0;
+                    let (target, d, _) = gs.region_fit(r, base.theta, base.psi);
+                    gs.set_scale(Scale::System, Some(r));
+                    (
+                        Pose {
+                            target,
+                            ln_d: ln_d.min(d.ln()),
+                            ..base
+                        },
+                        Move::Cross(cam::EASE_MS),
+                    )
+                })
+            }
+            Scale::System => {
+                let r = gs.region;
+                gs.set_scale(Scale::System, r);
+                Some((Pose { ln_d, ..base }, plain(keyed)))
+            }
+            Scale::Focus => gs.sel.map(|i| {
+                let r = gs.region_of(i);
+                gs.set_scale(Scale::Focus, r);
+                (
+                    Pose {
+                        target: gs.space.pos[i],
+                        ln_d: ln_d.min(gs.d_focus().ln()),
+                        ..base
+                    },
+                    Move::Ease(cam::EASE_MS),
+                )
+            }),
+        };
+        match (landing, crossing) {
+            (Some((to, mv)), _) => Act::Crossed(to, mv),
+            (None, Some(_)) => Act::Adjusted,
+            (None, None) => Act::Plain(Pose { ln_d, ..base }),
         }
     };
-    cam_to(to, Move::Ease(cam::KEY_MS));
+    match act {
+        Act::Adjusted => schedule(),
+        Act::Plain(to) => cam_to(to, plain(keyed)),
+        Act::Crossed(to, mv) => {
+            cam_to(to, mv);
+            retier();
+        }
+    }
+}
+
+/// A zoom that crosses no band: a key eases, the wheel cuts.
+fn plain(keyed: bool) -> Move {
+    if keyed {
+        Move::Ease(cam::KEY_MS)
+    } else {
+        Move::Cut
+    }
 }
 
 /// The orbit keys: turn the azimuth and tilt the elevation by degrees, about the target.
@@ -678,40 +1122,105 @@ pub fn orbit_by(d_theta: f64, d_psi: f64) {
     cam_to(to, Move::Ease(cam::KEY_MS));
 }
 
-/// Ease the camera onto a node, at distance `d` or close enough to see its neighbourhood.
+/// Ease the camera onto a node: at distance `d` (keeping the scale), or, for a selection
+/// (`d` is `None`), at the scale the selection sets: a card is approached close enough to see its
+/// neighbourhood (focus), a folder brings its region to system scale, the root the galaxy.
 pub fn focus_node(id: &str, d: Option<f64>) {
-    let to = {
+    if d.is_none() {
+        if id == "." {
+            fit();
+            return;
+        }
+        if state::idx().is_some_and(|x| x.is_dir(id)) {
+            frame_region(id);
+            return;
+        }
+    }
+    let (to, rescaled) = {
         let mut gs = g();
         let Some(&i) = gs.at.get(id) else { return };
         let target = gs.space.pos[i];
         let dest = gs.dest();
-        let near = cam::fit_sphere(FOCUS_RADIUS, gs.pane()).ln();
+        let near = gs.d_focus().ln();
         gs.autofit = false;
-        Pose {
+        let rescaled = d.is_none() && {
+            let r = gs.region_of(i);
+            gs.set_scale(Scale::Focus, r)
+        };
+        let to = Pose {
             target,
             ln_d: d.map(f64::ln).unwrap_or(dest.ln_d.min(near)),
             ..dest
-        }
+        };
+        (to, rescaled)
     };
     cam_to(to, Move::Ease(cam::EASE_MS));
+    if rescaled {
+        retier();
+    }
+}
+
+/// A folder is selected: its region, fitted to the pane from where the camera looks now, at
+/// system scale.
+fn frame_region(id: &str) {
+    let plan = {
+        let mut gs = g();
+        let Some(&i) = gs.at.get(id) else { return };
+        gs.region_of(i).map(|r| {
+            let dest = gs.dest();
+            let (target, d, pts) = gs.region_fit(r, dest.theta, dest.psi);
+            gs.autofit = true;
+            gs.fit = Fit::Points(pts);
+            let rescaled = gs.set_scale(Scale::System, Some(r));
+            (
+                Pose {
+                    target,
+                    ln_d: d.ln(),
+                    ..dest
+                },
+                rescaled,
+            )
+        })
+    };
+    match plan {
+        Some((to, rescaled)) => {
+            cam_to(to, Move::Cross(cam::EASE_MS));
+            if rescaled {
+                retier();
+            }
+        }
+        None => fit(),
+    }
 }
 
 // ---- selection -----------------------------------------------------------------------------
 
-/// `updateGraph()`: the selection changed (or what is drawn did): new instances, the hint.
+/// `updateGraph()`: the selection changed (or what is drawn did): the camera follows a new
+/// selection to the scale it sets (a folder's region at system scale, no selection the galaxy;
+/// a card's own move comes from `focus_node`), then new instances and the hint.
 pub fn update() {
-    if state::idx().is_none() {
-        return;
-    }
+    let Some(idx) = state::idx() else { return };
     let sel = state::sel();
-    let hint = {
+    let moved = {
         let mut gs = g();
         if !gs.built {
             return;
         }
-        let si = sel.as_deref().and_then(|s| gs.at.get(s).copied());
-        gs.sel = si;
-        gs.inst = Rc::new(instances(&gs));
+        gs.sel = sel.as_deref().and_then(|s| gs.at.get(s).copied());
+        let moved = gs.sel_id != sel;
+        gs.sel_id = sel.clone();
+        moved
+    };
+    if moved {
+        match sel.as_deref() {
+            None | Some(".") => fit(),
+            Some(s) if idx.is_dir(s) => frame_region(s),
+            _ => {}
+        }
+    }
+    retier();
+    let hint = {
+        let gs = g();
         let rsel = sel.as_deref().map(|s| gs.lay.rep_or(s).to_string());
         match (&sel, &rsel) {
             (Some(s), Some(r)) if s != r => {
@@ -721,8 +1230,25 @@ pub fn update() {
             _ => String::new(),
         }
     };
-    sync_instances();
     set_hint(&hint);
+}
+
+/// Decide again what is drawn (the selection, the scale or show all changed) and hand it to the
+/// GL.
+fn retier() {
+    let show_all = cfg().show_all;
+    {
+        let mut gs = g();
+        if !gs.built {
+            return;
+        }
+        gs.show_all = show_all;
+        let (inst, drawn, subs) = instances(&gs);
+        gs.inst = Rc::new(inst);
+        gs.drawn = Rc::new(drawn);
+        gs.subs = subs;
+    }
+    sync_instances();
     schedule();
 }
 
@@ -764,16 +1290,20 @@ fn frame_tick(now: f64) {
             let u = ((now - a.t0) / a.ms).clamp(0.0, 1.0);
             if u >= 1.0 {
                 gs.pose = a.to;
+                gs.rim = a.rim1;
                 gs.anim = None;
             } else {
-                gs.pose = cam::ease_pose(&a.from, &a.to, cam::smootherstep(u));
+                let e = cam::smootherstep(u);
+                gs.pose = cam::ease_pose(&a.from, &a.to, e);
+                gs.rim = a.rim0 + (a.rim1 - a.rim0) * e;
             }
         }
         render(&mut gs, now)
     };
-    if let Some((drawn, uploaded)) = out {
+    if let Some((drawn, uploaded, labels)) = out {
         if let Some(cv) = dom::try_id("graph") {
             gl::publish(&cv, &drawn);
+            overlay::publish(&cv, &labels);
         }
         if let Some((ids, inst)) = uploaded {
             gl::publish_positions(&ids, &inst);
@@ -792,9 +1322,227 @@ fn frame_tick(now: f64) {
 
 type Uploaded = Option<(Rc<Vec<String>>, Rc<gl::Instances>)>;
 
-/// Draw one frame at the current pose: project every node, sort far to near, draw the GL scene
-/// and the overlay's rings, and keep what was drawn for picking and for the hooks.
-fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded)> {
+/// The glyphs of one frame: screen-space marks for the GL, names for the overlay, picks, and
+/// what was drawn, for the hooks.
+#[derive(Default)]
+struct Glyphs {
+    under: Vec<gl::Mark>,
+    halos: Vec<gl::Mark>,
+    marks: Vec<gl::Mark>,
+    names: Vec<(usize, overlay::Name)>,
+    picks: Vec<Pick>,
+    regions: usize,
+    rim: usize,
+    rim_bundles: usize,
+    /// view depths of the glyphs in front of the camera
+    depths: Vec<f64>,
+}
+
+fn rgba(c: [f32; 4], a: f64) -> [f32; 4] {
+    [c[0], c[1], c[2], (c[3] as f64 * a) as f32]
+}
+
+fn lerp2(a: [f64; 2], b: [f64; 2], t: f64) -> [f64; 2] {
+    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+}
+
+fn mark(p: [f64; 2], r: f64, style: f32, rgba: [f32; 4]) -> gl::Mark {
+    let a = [p[0] as f32, p[1] as f32];
+    gl::Mark {
+        a,
+        b: a,
+        r: r as f32,
+        style,
+        rgba,
+    }
+}
+
+/// The region glyphs for this frame. At galaxy scale (rim weight 0) each region is a soft halo at
+/// its projected core, sized by its cards; where other regions sit on the rim (weight 1) each is a
+/// small disc on the rim at its true direction, hollow when its core is behind the camera, with a
+/// line from the active region's core; between, every glyph slides from one place to the other.
+/// The active region keeps its glyph at its core, and its subfolders get glyphs of their own. The
+/// root's cards and the external systems get one unlabelled glyph each, never on the rim.
+fn glyphs(gs: &G, pose: &Pose, pane: Pane, unit: f64) -> Glyphs {
+    let mut out = Glyphs::default();
+    let Some(c) = gs.colors.as_ref() else {
+        return out;
+    };
+    let w = gs.rim;
+    let ga = c.glyph_alpha as f64;
+    let inset = cam::Insets {
+        left: c.rim_inset.max(gs.chrome.0 + 14.0),
+        top: c.rim_inset,
+        right: c.rim_inset,
+        bottom: c.rim_inset.max(gs.chrome.1 + 14.0),
+    };
+    let centre = [pane.w / 2.0, pane.h / 2.0];
+    let regions = gs.space.regions.len().min(gs.vis.regions.len());
+    // where each region's glyph landed, for the lines out to the rim
+    let mut at: Vec<Option<[f64; 2]>> = vec![None; regions];
+    let fam_of = |r: usize| {
+        gs.region_node
+            .get(r)
+            .copied()
+            .flatten()
+            .map(|i| c.fam(&gs.nodes[i].fam))
+            .unwrap_or_else(|| c.fam("other"))
+    };
+    let halo_px = |world: f64, s: f64| (world * unit / s).max(DOT_PX * 2.0);
+    for r in (0..regions).filter(|&r| gs.vis.is_region(r)) {
+        let core = gs.space.regions[r].core;
+        let cards = gs.vis.cards.get(r).copied().unwrap_or(0) as f64;
+        let col = fam_of(r);
+        let world = GLYPH_R0 + GLYPH_K * cards.sqrt();
+        let proj = cam::project(core, pose, pane);
+        let active = gs.region == Some(r) && gs.scale != Scale::Galaxy;
+        let (p, alpha, radius) = if active {
+            let Some([x, y, s]) = proj else { continue };
+            out.depths.push(s);
+            out.halos.push(mark(
+                [x, y],
+                halo_px(world, s),
+                gl::mark::HALO,
+                rgba(col, ga * 0.6),
+            ));
+            ([x, y], 1.0, DOT_PX)
+        } else {
+            let rp = cam::rim_point(core, pose, pane, inset);
+            let (p, front) = match proj {
+                Some([x, y, s]) => {
+                    out.depths.push(s);
+                    if w < 1.0 {
+                        let hr = halo_px(world, s) * (1.0 - w) + RIM_PX * w;
+                        out.halos.push(mark(
+                            lerp2([x, y], rp, w),
+                            hr,
+                            gl::mark::HALO,
+                            rgba(col, ga * (1.0 - w)),
+                        ));
+                    }
+                    (lerp2([x, y], rp, w), true)
+                }
+                None => (rp, false),
+            };
+            let alpha = if front { 1.0 } else { w };
+            if alpha < 0.02 {
+                continue;
+            }
+            let radius = DOT_PX + (RIM_PX + 0.25 * cards.sqrt().min(8.0) - DOT_PX) * w;
+            if w > 0.5 {
+                out.rim += 1;
+            }
+            let style = if front {
+                gl::mark::DISC
+            } else {
+                gl::mark::RING
+            };
+            out.marks
+                .push(mark(p, radius, style, rgba(col, 0.95 * alpha)));
+            (p, alpha, radius)
+        };
+        if active {
+            out.marks
+                .push(mark(p, radius, gl::mark::DISC, rgba(col, 0.95)));
+        }
+        out.regions += 1;
+        at[r] = Some(p);
+        if let Some(i) = gs.region_node.get(r).copied().flatten() {
+            out.picks.push(Pick {
+                x: p[0],
+                y: p[1],
+                r: radius + 4.0,
+                i,
+            });
+        }
+        if alpha > 0.5 {
+            // a name leans toward the pane centre once its glyph is on the rim
+            let (dx, dy) = (centre[0] - p[0], centre[1] - p[1]);
+            let l = dx.hypot(dy).max(1e-9);
+            let lean = if active { 0.0 } else { w };
+            out.names.push((
+                cards as usize,
+                overlay::Name {
+                    x: p[0],
+                    y: p[1],
+                    r: radius,
+                    inward: [dx / l * lean + (1.0 - lean), dy / l * lean],
+                    text: gs.vis.regions[r].trim_end_matches('/').to_string(),
+                },
+            ));
+        }
+    }
+    // the active region's subfolders
+    for &i in &gs.subs {
+        if let Some([x, y, s]) = cam::project(gs.space.pos[i], pose, pane) {
+            let v = &gs.nodes[i];
+            let world = SUB_R0 + SUB_K * v.files.sqrt();
+            out.halos.push(mark(
+                [x, y],
+                halo_px(world, s),
+                gl::mark::HALO,
+                rgba(c.fam(&v.fam), ga * 0.5 * w),
+            ));
+        }
+    }
+    // lines from the active region's core out to the others' glyphs
+    let active = gs.region.filter(|_| w > 0.0 && !gs.show_all);
+    if let Some((a, from)) = active.and_then(|a| Some((a, at.get(a).copied().flatten()?))) {
+        for b in gs.bundles.iter().filter(|b| b.a == a || b.b == a) {
+            let other = if b.a == a { b.b } else { b.a };
+            if let Some(to) = at.get(other).copied().flatten() {
+                out.under.push(gl::Mark {
+                    a: [from[0] as f32, from[1] as f32],
+                    b: [to[0] as f32, to[1] as f32],
+                    r: b.w * 0.5,
+                    style: gl::mark::DISC,
+                    rgba: rgba(c.bundle, b.alpha as f64 * w),
+                });
+                out.rim_bundles += 1;
+            }
+        }
+    }
+    // the root's cards at the centre, and the external systems: one unlabelled glyph each
+    let root = gs.region_node.first().copied().flatten();
+    let n_root = gs.vis.cards.first().copied().unwrap_or(0) as f64;
+    let mut pseudo = vec![(
+        [0.0; 3],
+        c.accent,
+        GLYPH_R0 * 0.7 + 4.0 * n_root.sqrt(),
+        gl::mark::DISC,
+        root.or_else(|| gs.at.get(".").copied()),
+    )];
+    if let (true, Some(sr)) = (gs.n_surf > 0, gs.space.regions.get(1)) {
+        let world = GLYPH_R0 * 0.7 + 4.0 * (gs.n_surf as f64).sqrt();
+        pseudo.push((sr.core, c.fam("world"), world, gl::mark::RING, None));
+    }
+    for (p, col, world, style, pick) in pseudo {
+        if let Some([x, y, s]) = cam::project(p, pose, pane) {
+            out.depths.push(s);
+            out.halos.push(mark(
+                [x, y],
+                halo_px(world, s),
+                gl::mark::HALO,
+                rgba(col, ga * 0.7),
+            ));
+            out.marks
+                .push(mark([x, y], DOT_PX + 0.5, style, rgba(col, 0.9)));
+            if let Some(i) = pick {
+                out.picks.push(Pick {
+                    x,
+                    y,
+                    r: DOT_PX + 4.0,
+                    i,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Draw one frame at the current pose: project the drawn points, sort them far to near, place the
+/// glyphs, draw the GL scene and the overlay, and keep what was drawn for picking and the hooks.
+fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, Vec<overlay::Placed>)> {
     if gs.w <= 0.0 || gs.h <= 0.0 || !gs.built {
         return None;
     }
@@ -818,22 +1566,27 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded)> {
     let pane = gs.pane();
     let pose = gs.pose;
     let unit = cam::px_per_unit(pane);
-    let mut items: Vec<(f64, u32, f64, f64)> = Vec::with_capacity(gs.nodes.len());
-    for (i, p) in gs.space.pos.iter().enumerate() {
-        if let Some([x, y, s]) = cam::project(*p, &pose, pane) {
-            items.push((s, i as u32, x, y));
+    let drawn = gs.drawn.clone();
+    let mut items: Vec<(f64, u32, f64, f64)> = Vec::with_capacity(drawn.len());
+    for &i in drawn.iter() {
+        if let Some([x, y, s]) = cam::project(gs.space.pos[i as usize], &pose, pane) {
+            items.push((s, i, x, y));
         }
     }
     items.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    let gly = glyphs(gs, &pose, pane, unit);
     let (near, far) = items
         .iter()
-        .fold((f64::MAX, 0.0f64), |(n, f), it| (n.min(it.0), f.max(it.0)));
+        .map(|it| it.0)
+        .chain(gly.depths.iter().copied())
+        .fold((f64::MAX, 0.0f64), |(n, f), s| (n.min(s), f.max(s)));
+    let (near, far) = if near > far { (1.0, 2.0) } else { (near, far) };
     let order: Vec<u32> = items.iter().map(|it| it.1).collect();
     let cards = items
         .iter()
         .filter(|it| gs.nodes[it.1 as usize].kind == Kind::File)
         .count();
-    let picks: Vec<Pick> = items
+    let mut picks: Vec<Pick> = items
         .iter()
         .rev()
         .map(|&(s, i, x, y)| Pick {
@@ -843,13 +1596,24 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded)> {
             i: i as usize,
         })
         .collect();
-    let (bg, fog, accent_css) = gs
+    picks.extend(gly.picks);
+    let (bg, fog, accent_css, additive) = gs
         .colors
         .as_ref()
-        .map(|c| (c.bg, c.fog, c.accent_css.clone()))
-        .unwrap_or(([0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0], "#ffa028".into()));
+        .map(|c| (c.bg, c.fog, c.accent_css.clone(), c.dark))
+        .unwrap_or((
+            [0.0, 0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
+            "#ffa028".into(),
+            true,
+        ));
     let vp = cam::view_proj(&pose, pane, gs.space.radius).map(|v| v as f32);
-    let edges = gs.gl.as_ref().and_then(|r| {
+    let fade = if gs.show_all {
+        0.0
+    } else {
+        (1.0 - gs.rim) as f32
+    };
+    let counts = gs.gl.as_ref().and_then(|r| {
         r.draw(&gl::Frame {
             vp,
             order: &order,
@@ -859,9 +1623,14 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded)> {
             depth: (near as f32, far as f32),
             bg,
             fog,
+            bundle_fade: fade,
+            under: &gly.under,
+            halos: &gly.halos,
+            marks: &gly.marks,
+            additive,
         })
     });
-    // the overlay: hover, the walk's place, and the flash after a live change
+    // the overlay: region names (the larger regions first), hover, the walk's place, the flash
     let at = |i: usize| picks.iter().find(|p| p.i == i).map(|p| (p.x, p.y, p.r));
     let mut rings = Vec::new();
     for &(i, t0) in &gs.flash {
@@ -898,13 +1667,30 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded)> {
             dashed: true,
         });
     }
-    if let Some(ov) = &gs.ov {
-        ov.draw(gs.w, gs.h, gs.dpr, &accent_css, &rings);
-    }
+    let mut names = gly.names;
+    names.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.text.cmp(&b.1.text)));
+    let names: Vec<overlay::Name> = names.into_iter().map(|(_, n)| n).collect();
+    let labels = match &gs.ov {
+        Some(ov) => ov.draw(gs.w, gs.h, gs.dpr, &accent_css, &rings, &names),
+        None => Vec::new(),
+    };
     gs.picks = picks;
-    let edges = edges?;
+    let (edges, gl_bundles) = counts?;
     let drawn = gl::Drawn {
-        scale: if gs.sel.is_some() { "focus" } else { "galaxy" },
+        scale: gs.scale.name(),
+        region: gs
+            .region
+            .filter(|_| gs.scale != Scale::Galaxy)
+            .and_then(|r| gs.vis.regions.get(r).cloned())
+            .unwrap_or_default(),
+        show_all: gs.show_all,
+        regions: gly.regions,
+        rim: gly.rim,
+        bundles: if gl_bundles > 0 {
+            gl_bundles
+        } else {
+            gly.rim_bundles
+        },
         theta_deg: pose.theta.to_degrees(),
         psi_deg: pose.psi.to_degrees(),
         dist: pose.d(),
@@ -916,7 +1702,7 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded)> {
         dist_galaxy: gs.d_galaxy(),
         focus: gs.sel.map(|i| gs.ids[i].clone()).unwrap_or_default(),
     };
-    Some((drawn, uploaded))
+    Some((drawn, uploaded, labels))
 }
 
 /// When a test has put an array on `window.__oktDraw`, keep the last few hundred frame times on it
@@ -1071,9 +1857,11 @@ pub fn frame_selection() {
         return;
     };
     let members = insp::walk_list(&idx, &sel);
-    let to = {
+    let (to, rescaled) = {
         let mut gs = g();
         let Some(&i) = gs.at.get(&sel) else { return };
+        let r = gs.region_of(i);
+        let rescaled = gs.set_scale(Scale::Focus, r);
         let target = gs.space.pos[i];
         let mut pts = vec![target];
         for (m, _) in &members {
@@ -1093,13 +1881,17 @@ pub fn frame_selection() {
         );
         gs.autofit = true;
         gs.fit = Fit::Points(pts);
-        Pose {
+        let to = Pose {
             target,
             ln_d: d.ln(),
             ..dest
-        }
+        };
+        (to, rescaled)
     };
     cam_to(to, Move::Ease(cam::EASE_MS));
+    if rescaled {
+        retier();
+    }
 }
 
 // ---- input -----------------------------------------------------------------------------------
@@ -1196,18 +1988,24 @@ fn set_hover(new: Option<usize>, cx: f64, cy: f64) {
     }
 }
 
-/// Toggle the "all labels" display (`settings.labels`).
-pub fn toggle_labels() {
+/// Toggle "show all" (`settings.showAll`): every card and every link edge, at every scale,
+/// whatever is collapsed.
+pub fn toggle_show_all() {
     {
         let mut c = state::cfg_mut();
-        c.labels = !c.labels;
+        c.show_all = !c.show_all;
     }
     state::save_settings();
-    let on = cfg().labels;
-    if let Some(b) = dom::q(".gtools [data-z=labels]") {
+    mark_show_all();
+    retier();
+}
+
+/// The toolbar's show-all button follows the setting.
+fn mark_show_all() {
+    let on = cfg().show_all;
+    if let Some(b) = dom::q(".gtools [data-z=all]") {
         dom::toggle(&b, "on", on);
     }
-    schedule();
 }
 
 /// `toggleCollapse(id, force)`
@@ -1233,8 +2031,10 @@ pub fn toggle_collapse(id: &str, force: Option<bool>) {
 fn resize() {
     let host = dom::id("v-graph");
     let r = host.get_bounding_client_rect();
+    let chrome = chrome_insets();
     let refit = {
         let mut gs = g();
+        gs.chrome = chrome;
         let changed = gs.w != r.width() || gs.h != r.height();
         gs.w = r.width();
         gs.h = r.height();
@@ -1309,16 +2109,11 @@ pub fn wire() {
     // wheel and pinch: the camera distance, about the target
     dom::on_active(cvt, "wheel", |e: WheelEvent| {
         e.prevent_default();
-        let to = {
-            let mut gs = g();
-            gs.autofit = false;
-            let dl = cam::wheel_delta(e.delta_y(), e.delta_mode(), e.ctrl_key(), gs.h);
-            Pose {
-                ln_d: gs.pose.ln_d + dl,
-                ..gs.pose
-            }
-        };
-        cam_to(to, Move::Cut);
+        let h = g().h;
+        zoom(
+            cam::wheel_delta(e.delta_y(), e.delta_mode(), e.ctrl_key(), h),
+            false,
+        );
     });
     dom::on(cvt, "pointerdown", |e: PointerEvent| {
         if e.button() != 0 {
@@ -1436,10 +2231,11 @@ pub fn wire() {
                 "in" => zoom_by(cam::ZOOM_STEP),
                 "out" => zoom_by(1.0 / cam::ZOOM_STEP),
                 "fit" => fit(),
-                "labels" => toggle_labels(),
+                "all" => toggle_show_all(),
                 _ => {}
             }
         });
     }
+    mark_show_all();
     resize();
 }

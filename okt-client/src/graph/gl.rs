@@ -5,9 +5,16 @@
 //! into two instance buffers. A frame uploads only its uniforms and the back-to-front order of the
 //! points (one `u32` per point). Points are instanced quads that read their node from the
 //! textures; edges are instanced line quads that read both ends from the same position texture.
-//! Both passes blend premultiplied "over" with no depth test: edges first, then points, sorted far
-//! to near so nearer cards cover farther ones. Depth reads as falling alpha and saturation and an
-//! aerial fade toward the background (`--graph-fog`), never blur.
+//! Bundles between regions are tessellated once per build into extra texels past the nodes, and
+//! drawn as edges of their own group, faded by one uniform as the scale moves away from galaxy.
+//! Glyphs (region halos, rim glyphs, the lines out to them) are screen-space marks, a few dozen
+//! uploaded per frame: capsules that are discs when their two ends meet.
+//!
+//! Every pass blends premultiplied "over" with no depth test, in order: edges and bundles, the
+//! marks under the glyphs (lines to the rim), glyph halos (additive on a dark background), points
+//! sorted far to near so nearer cards cover farther ones, then the glyph marks. Depth reads as
+//! falling alpha and saturation and an aerial fade toward the background (`--graph-fog`), never
+//! blur.
 //!
 //! The test hooks (`data-*` on `#graph`, `window.__oktPos`) are written here, from what was
 //! drawn and uploaded, never from a camera destination or a parallel computation.
@@ -37,17 +44,50 @@ pub mod style {
     pub const HALO: f32 = 3.0;
 }
 
+/// How a screen-space mark is drawn.
+pub mod mark {
+    /// an even glow with a soft edge: a glyph's halo, the cloud its cards make
+    pub const HALO: f32 = 0.0;
+    /// a filled capsule: a disc when its ends meet, otherwise a line
+    pub const DISC: f32 = 1.0;
+    /// an outline: a rim glyph whose region is behind the camera
+    pub const RING: f32 = 2.0;
+}
+
+/// Edge groups (the sixth float of an edge).
+pub mod group {
+    /// a link between two cards
+    pub const LINK: f32 = 0.0;
+    /// a segment of a bundle between two regions
+    pub const BUNDLE: f32 = 1.0;
+}
+
 /// Everything a change of what is drawn uploads.
 #[derive(Clone, Default)]
 pub struct Instances {
-    /// per node: x, y, z, world radius
+    /// per node, then per bundle point: x, y, z, world radius
     pub pos: Vec<f32>,
-    /// per node: straight r, g, b, and a [`style`]
+    /// per node, then per bundle point: straight r, g, b, and a [`style`]
     pub col: Vec<f32>,
-    /// per drawn edge: its two nodes
+    /// per drawn edge: its two texels (links first, then bundle segments)
     pub ends: Vec<u32>,
-    /// per drawn edge: straight r, g, b, a, and its width in CSS px
+    /// per drawn edge: straight r, g, b, a, its width in CSS px, and its [`group`]
     pub ecol: Vec<f32>,
+    /// link edges among `ends`
+    pub n_links: usize,
+    /// bundles whose segments follow the links
+    pub n_bundles: usize,
+}
+
+/// One screen-space mark, in pane CSS px: a capsule from `a` to `b` of radius `r`.
+#[derive(Clone, Copy, Debug)]
+pub struct Mark {
+    pub a: [f32; 2],
+    pub b: [f32; 2],
+    pub r: f32,
+    pub style: f32,
+    /// straight r, g, b, a
+    pub rgba: [f32; 4],
 }
 
 /// What one frame needs beyond the instances.
@@ -65,6 +105,16 @@ pub struct Frame<'a> {
     pub depth: (f32, f32),
     pub bg: [f32; 4],
     pub fog: [f32; 4],
+    /// how much of the bundles shows (1 at galaxy scale, 0 at the rim)
+    pub bundle_fade: f32,
+    /// lines out to the rim glyphs, under everything else drawn this frame
+    pub under: &'a [Mark],
+    /// glyph halos
+    pub halos: &'a [Mark],
+    /// glyph discs and rings, over the points
+    pub marks: &'a [Mark],
+    /// halos add light (a dark background) rather than cover
+    pub additive: bool,
 }
 
 const POINT_VS: &str = r#"#version 300 es
@@ -144,10 +194,12 @@ uniform vec2 u_px;
 uniform float u_dpr;
 uniform vec2 u_depth;
 uniform vec4 u_fog;
+uniform float u_bundle;
 layout(location = 0) in vec2 a_corner;
 layout(location = 1) in uvec2 a_ends;
 layout(location = 2) in vec4 a_col;
 layout(location = 3) in float a_w;
+layout(location = 4) in float a_grp;
 out vec4 v_col;
 out float v_side;
 out float v_hw;
@@ -172,7 +224,7 @@ void main() {
   v_side = a_corner.y * hw;
   v_hw = w * 0.5;
   float t = clamp((p.w - u_depth.x) / max(u_depth.y - u_depth.x, 1e-3), 0.0, 1.0);
-  float alpha = a_col.a * mix(1.0, 0.5, t) * min(a_w * u_dpr, 1.0);
+  float alpha = a_col.a * mix(1.0, 0.5, t) * min(a_w * u_dpr, 1.0) * mix(1.0, u_bundle, a_grp);
   v_col = vec4(mix(a_col.rgb, u_fog.rgb, 0.45 * t), alpha);
 }
 "#;
@@ -190,10 +242,67 @@ void main() {
 }
 "#;
 
-/// The uniforms both programs may use, looked up once per link.
-const UNIFORMS: [&str; 8] = [
-    "u_vp", "u_pos", "u_col", "u_px", "u_scale", "u_dpr", "u_depth", "u_fog",
+const MARK_VS: &str = r#"#version 300 es
+precision highp float;
+uniform vec2 u_px;
+uniform float u_dpr;
+layout(location = 0) in vec2 a_corner;
+layout(location = 1) in vec4 a_seg;
+layout(location = 2) in vec2 a_rs;
+layout(location = 3) in vec4 a_col;
+out vec2 v_p;
+flat out vec4 v_seg;
+flat out vec2 v_rs;
+flat out vec4 v_col;
+void main() {
+  vec2 p0 = a_seg.xy * u_dpr;
+  vec2 p1 = a_seg.zw * u_dpr;
+  float r = a_rs.x * u_dpr;
+  float ext = r + 1.5;
+  vec2 d = p1 - p0;
+  float len = length(d);
+  vec2 t = len > 1e-3 ? d / len : vec2(1.0, 0.0);
+  vec2 n = vec2(-t.y, t.x);
+  vec2 p = (p0 + p1) * 0.5 + t * a_corner.x * (len * 0.5 + ext) + n * a_corner.y * ext;
+  v_p = p;
+  v_seg = vec4(p0, p1);
+  v_rs = vec2(r, a_rs.y);
+  v_col = a_col;
+  gl_Position = vec4(p.x / u_px.x * 2.0 - 1.0, 1.0 - p.y / u_px.y * 2.0, 0.0, 1.0);
+}
+"#;
+
+const MARK_FS: &str = r#"#version 300 es
+precision highp float;
+uniform float u_dpr;
+in vec2 v_p;
+flat in vec4 v_seg;
+flat in vec2 v_rs;
+flat in vec4 v_col;
+out vec4 o;
+void main() {
+  vec2 pa = v_p - v_seg.xy;
+  vec2 ba = v_seg.zw - v_seg.xy;
+  float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+  float d = length(pa - ba * h);
+  float r = max(v_rs.x, 0.5);
+  int style = int(v_rs.y + 0.5);
+  float a;
+  if (style == 0) a = 1.0 - smoothstep(0.7, 1.0, d / r);
+  else if (style == 2) { float w = 1.25 * u_dpr; a = clamp(w * 0.5 + 0.5 - abs(d - (r - w * 0.5)), 0.0, 1.0); }
+  else a = clamp(r - d + 0.5, 0.0, 1.0);
+  a *= v_col.a;
+  if (a <= 0.003) discard;
+  o = vec4(v_col.rgb * a, a);
+}
+"#;
+
+/// The uniforms the programs may use, looked up once per link.
+const UNIFORMS: [&str; 9] = [
+    "u_vp", "u_pos", "u_col", "u_px", "u_scale", "u_dpr", "u_depth", "u_fog", "u_bundle",
 ];
+/// Floats per mark: the two ends, radius, style, and the colour.
+const MARK_FLOATS: usize = 10;
 
 struct Prog {
     p: WebGlProgram,
@@ -211,11 +320,14 @@ impl Prog {
 struct Res {
     pt: Prog,
     ln: Prog,
+    mk: Prog,
     vao_pt: WebGlVertexArrayObject,
     vao_ln: WebGlVertexArrayObject,
+    vao_mk: WebGlVertexArrayObject,
     order: WebGlBuffer,
     ends: WebGlBuffer,
     ecol: WebGlBuffer,
+    marks: WebGlBuffer,
     tex_pos: WebGlTexture,
     tex_col: WebGlTexture,
 }
@@ -224,6 +336,8 @@ pub struct Renderer {
     gl: Gl,
     res: Option<Res>,
     n_edges: i32,
+    n_links: usize,
+    n_bundles: usize,
     pos_hash: u64,
 }
 
@@ -306,6 +420,7 @@ fn texture(gl: &Gl) -> Option<WebGlTexture> {
 fn init(gl: &Gl) -> Option<Res> {
     let pt = program(gl, POINT_VS, POINT_FS)?;
     let ln = program(gl, LINE_VS, LINE_FS)?;
+    let mk = program(gl, MARK_VS, MARK_FS)?;
     // points: a corner per vertex, the node index per instance
     let vao_pt = gl.create_vertex_array()?;
     gl.bind_vertex_array(Some(&vao_pt));
@@ -330,12 +445,25 @@ fn init(gl: &Gl) -> Option<Res> {
     gl.vertex_attrib_divisor(1, 1);
     let ecol = gl.create_buffer()?;
     gl.bind_buffer(Gl::ARRAY_BUFFER, Some(&ecol));
-    gl.enable_vertex_attrib_array(2);
-    gl.vertex_attrib_pointer_with_i32(2, 4, Gl::FLOAT, false, 20, 0);
-    gl.vertex_attrib_divisor(2, 1);
-    gl.enable_vertex_attrib_array(3);
-    gl.vertex_attrib_pointer_with_i32(3, 1, Gl::FLOAT, false, 20, 16);
-    gl.vertex_attrib_divisor(3, 1);
+    for (loc, size, off) in [(2, 4, 0), (3, 1, 16), (4, 1, 20)] {
+        gl.enable_vertex_attrib_array(loc);
+        gl.vertex_attrib_pointer_with_i32(loc, size, Gl::FLOAT, false, 24, off);
+        gl.vertex_attrib_divisor(loc, 1);
+    }
+    // marks: a corner per vertex; ends, radius and style, colour per instance
+    let vao_mk = gl.create_vertex_array()?;
+    gl.bind_vertex_array(Some(&vao_mk));
+    corners(gl, &[-1.0, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0])?;
+    gl.enable_vertex_attrib_array(0);
+    gl.vertex_attrib_pointer_with_i32(0, 2, Gl::FLOAT, false, 0, 0);
+    let marks = gl.create_buffer()?;
+    gl.bind_buffer(Gl::ARRAY_BUFFER, Some(&marks));
+    let stride = (MARK_FLOATS * 4) as i32;
+    for (loc, size, off) in [(1, 4, 0), (2, 2, 16), (3, 4, 24)] {
+        gl.enable_vertex_attrib_array(loc);
+        gl.vertex_attrib_pointer_with_i32(loc, size, Gl::FLOAT, false, stride, off);
+        gl.vertex_attrib_divisor(loc, 1);
+    }
     gl.bind_vertex_array(None);
     let tex_pos = texture(gl)?;
     let tex_col = texture(gl)?;
@@ -345,11 +473,14 @@ fn init(gl: &Gl) -> Option<Res> {
     Some(Res {
         pt,
         ln,
+        mk,
         vao_pt,
         vao_ln,
+        vao_mk,
         order,
         ends,
         ecol,
+        marks,
         tex_pos,
         tex_col,
     })
@@ -409,6 +540,8 @@ impl Renderer {
             gl,
             res,
             n_edges: 0,
+            n_links: 0,
+            n_bundles: 0,
             pos_hash: 0,
         })
     }
@@ -447,6 +580,8 @@ impl Renderer {
             Gl::DYNAMIC_DRAW,
         );
         self.n_edges = (inst.ends.len() / 2) as i32;
+        self.n_links = inst.n_links;
+        self.n_bundles = inst.n_bundles;
         true
     }
 
@@ -455,8 +590,9 @@ impl Renderer {
         self.pos_hash
     }
 
-    /// Draw one frame. Returns the number of edges drawn, or `None` when nothing could be.
-    pub fn draw(&self, f: &Frame) -> Option<usize> {
+    /// Draw one frame. Returns the link edges and the bundles drawn, or `None` when nothing could
+    /// be.
+    pub fn draw(&self, f: &Frame) -> Option<(usize, usize)> {
         let r = self.res.as_ref()?;
         let gl = &self.gl;
         if gl.is_context_lost() {
@@ -482,9 +618,35 @@ impl Renderer {
         };
         if self.n_edges > 0 {
             common(&r.ln);
+            gl.uniform1f(r.ln.loc("u_bundle"), f.bundle_fade);
             gl.bind_vertex_array(Some(&r.vao_ln));
             gl.draw_arrays_instanced(Gl::TRIANGLE_STRIP, 0, 4, self.n_edges);
         }
+        let marks = |ms: &[Mark]| {
+            if ms.is_empty() {
+                return;
+            }
+            let mut buf = Vec::with_capacity(ms.len() * MARK_FLOATS);
+            for m in ms {
+                buf.extend([m.a[0], m.a[1], m.b[0], m.b[1], m.r, m.style]);
+                buf.extend(m.rgba);
+            }
+            common(&r.mk);
+            gl.bind_buffer(Gl::ARRAY_BUFFER, Some(&r.marks));
+            gl.buffer_data_with_array_buffer_view(
+                Gl::ARRAY_BUFFER,
+                &js_sys::Float32Array::from(&buf[..]),
+                Gl::STREAM_DRAW,
+            );
+            gl.bind_vertex_array(Some(&r.vao_mk));
+            gl.draw_arrays_instanced(Gl::TRIANGLE_STRIP, 0, 4, ms.len() as i32);
+        };
+        marks(f.under);
+        if f.additive {
+            gl.blend_func(Gl::ONE, Gl::ONE);
+        }
+        marks(f.halos);
+        gl.blend_func(Gl::ONE, Gl::ONE_MINUS_SRC_ALPHA);
         if !f.order.is_empty() {
             common(&r.pt);
             gl.uniform1f(r.pt.loc("u_scale"), f.scale);
@@ -497,8 +659,14 @@ impl Renderer {
             gl.bind_vertex_array(Some(&r.vao_pt));
             gl.draw_arrays_instanced(Gl::TRIANGLE_STRIP, 0, 4, f.order.len() as i32);
         }
+        marks(f.marks);
         gl.bind_vertex_array(None);
-        Some(self.n_edges as usize)
+        let bundles = if f.bundle_fade > 0.003 {
+            self.n_bundles
+        } else {
+            0
+        };
+        Some((self.n_links, bundles))
     }
 }
 
@@ -507,6 +675,14 @@ impl Renderer {
 /// What a frame drew, for the hooks.
 pub struct Drawn {
     pub scale: &'static str,
+    /// the active region's folder, or empty
+    pub region: String,
+    pub show_all: bool,
+    /// region glyphs drawn, those of them on the rim, and the bundles drawn (to the rim or
+    /// between regions)
+    pub regions: usize,
+    pub rim: usize,
+    pub bundles: usize,
     pub theta_deg: f64,
     pub psi_deg: f64,
     pub dist: f64,
@@ -556,8 +732,16 @@ pub fn publish(cv: &Element, d: &Drawn) {
             .collect::<Vec<_>>()
             .join(",")
     );
-    let vals: [(&'static str, String); 11] = [
+    let vals: [(&'static str, String); 16] = [
         ("data-scale", d.scale.to_string()),
+        ("data-region", d.region.clone()),
+        (
+            "data-showall",
+            if d.show_all { "1" } else { "0" }.to_string(),
+        ),
+        ("data-regions", d.regions.to_string()),
+        ("data-rim", d.rim.to_string()),
+        ("data-bundles", d.bundles.to_string()),
         ("data-theta", deg1(d.theta_deg)),
         ("data-psi", deg1(d.psi_deg)),
         ("data-dist", sig3(d.dist)),

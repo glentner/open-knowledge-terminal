@@ -25,6 +25,12 @@
   /* the graph: far cards fade toward the fog; the selection's halo */
   --graph-fog: var(--graph-bg);
   --graph-halo: var(--accent);
+  /* the galaxy: a region glyph's halo (its family colour) at this peak alpha; the bundles between
+     regions (alpha and width by link count); the rim other regions sit on, this far inside the
+     pane's edge, at system and focus scale */
+  --graph-glyph-alpha: .30;
+  --graph-bundle: var(--ink-2);
+  --graph-rim-inset: 34px;
 }
 
 :root[data-theme="terminal"] {
@@ -175,8 +181,9 @@ a { color: inherit; }
 #graph { width: 100%; height: 100%; display: block; cursor: grab; user-select: none; touch-action: none; }
 #graph.onnode { cursor: pointer; }
 #graph.orbiting { cursor: grabbing; }
-/* the flat overlay over the GL canvas: hover and walk rings; never takes the pointer */
-#goverlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+/* the flat overlay over the GL canvas: region names, hover and walk rings; never takes the
+   pointer. Its font and colour are the region names', knocked out of --graph-bg */
+#goverlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; font: 600 10.5px var(--mono); letter-spacing: .04em; color: var(--ink-2); }
 .gtools { position: absolute; left: 10px; top: 10px; display: flex; flex-direction: column; gap: 3px; }
 .gtools button { width: 26px; height: 24px; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink-2); font-size: 12px; }
 .gtools button:hover, .gtools button.on { border-color: var(--accent); color: var(--accent-text); }

@@ -266,6 +266,168 @@ pub fn fit_distance(
     d
 }
 
+// ---- scales --------------------------------------------------------------------------------
+
+/// The three scales, innermost first: a card and its links, one region, the whole graph.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Scale {
+    Focus,
+    System,
+    Galaxy,
+}
+
+impl Scale {
+    pub fn name(self) -> &'static str {
+        match self {
+            Scale::Focus => "focus",
+            Scale::System => "system",
+            Scale::Galaxy => "galaxy",
+        }
+    }
+}
+
+/// Hysteresis around a band boundary: a zoom crosses outward past `B·HYST` and inward below
+/// `B/HYST`, so a distance sitting near a boundary never flip-flops.
+pub const HYST: f64 = 1.15;
+
+/// The camera distances where the scales meet: `inner` between focus and system, `outer` between
+/// system and galaxy.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bands {
+    pub inner: f64,
+    pub outer: f64,
+}
+
+/// The boundaries between the scales' own distances (a card's approach, a region's fit, the
+/// galaxy's fit), each the geometric mean of its neighbours. The three are first spread at
+/// least 1.5× apart, so a tiny region or galaxy never inverts the bands.
+pub fn bands(d_focus: f64, d_system: f64, d_galaxy: f64) -> Bands {
+    let f = d_focus.max(1e-6);
+    let s = d_system.max(1.5 * f);
+    let g = d_galaxy.max(1.5 * s);
+    Bands {
+        inner: (f * s).sqrt(),
+        outer: (s * g).sqrt(),
+    }
+}
+
+/// The scale at camera distance `d`, coming from `prev`, never inside `innermost` (a card
+/// selected in the active region allows focus; otherwise system is the innermost a zoom
+/// reaches). Consulted only on user zoom input; a solved move sets its own scale.
+pub fn classify(d: f64, b: &Bands, prev: Scale, innermost: Scale) -> Scale {
+    let mut s = prev;
+    loop {
+        s = match s {
+            Scale::Focus if d > b.inner * HYST => Scale::System,
+            Scale::System if d > b.outer * HYST => Scale::Galaxy,
+            _ => break,
+        };
+    }
+    loop {
+        s = match s {
+            Scale::Galaxy if d < b.outer / HYST => Scale::System,
+            Scale::System if d < b.inner / HYST => Scale::Focus,
+            _ => break,
+        };
+    }
+    s.max(innermost)
+}
+
+/// A region a zoom-in at galaxy scale may enter: its core, its card count and its name.
+#[derive(Clone, Copy, Debug)]
+pub struct Candidate<'a> {
+    pub core: V3,
+    pub cards: usize,
+    pub name: &'a str,
+}
+
+/// The candidate nearest the pane centre: among cores in front of the camera, the one projecting
+/// closest to the centre in pane pixels; only when none is in front, the one nearest the view
+/// axis by angle. Ties go to the larger card count, then the name.
+pub fn nearest_to_centre(cands: &[Candidate], pose: &Pose, pane: Pane) -> Option<usize> {
+    let b = basis(pose.theta, pose.psi);
+    let d = pose.d();
+    let eye = [
+        pose.target[0] + d * b.dir[0],
+        pose.target[1] + d * b.dir[1],
+        pose.target[2] + d * b.dir[2],
+    ];
+    // (behind, distance from the centre) per candidate: pixels in front, 1 − cos behind
+    let key = |c: &Candidate| match project(c.core, pose, pane) {
+        Some(p) => (false, (p[0] - pane.w / 2.0).hypot(p[1] - pane.h / 2.0)),
+        None => {
+            let v = sub(c.core, eye);
+            let l = dot(v, v).sqrt().max(1e-12);
+            (true, 1.0 + dot(v, b.dir) / l)
+        }
+    };
+    let keys: Vec<(bool, f64)> = cands.iter().map(key).collect();
+    let mut best: Option<usize> = None;
+    for i in 0..cands.len() {
+        let Some(j) = best else {
+            best = Some(i);
+            continue;
+        };
+        let (ki, kj) = (keys[i], keys[j]);
+        let tie = (ki.1 - kj.1).abs() <= 1e-9 * (1.0 + kj.1.abs());
+        let better = if ki.0 != kj.0 {
+            !ki.0
+        } else if !tie {
+            ki.1 < kj.1
+        } else if cands[i].cards != cands[j].cards {
+            cands[i].cards > cands[j].cards
+        } else {
+            cands[i].name < cands[j].name
+        };
+        if better {
+            best = Some(i);
+        }
+    }
+    best
+}
+
+/// How far inside each edge of the pane the rim runs, in CSS px.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Insets {
+    pub left: f64,
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
+}
+
+/// Where a region's rim glyph sits: on the rectangle `inset` inside the pane's edges, where the
+/// ray from the pane centre at the on-screen angle of the region's true direction from the target
+/// (`p`, in world units) meets it. The angle comes from view coordinates, so a region behind the
+/// camera still points its way.
+pub fn rim_point(p: V3, pose: &Pose, pane: Pane, inset: Insets) -> [f64; 2] {
+    let b = basis(pose.theta, pose.psi);
+    let q = sub(p, pose.target);
+    let (x, y) = (dot(q, b.r), dot(q, b.u));
+    let a = if x == 0.0 && y == 0.0 {
+        0.0
+    } else {
+        y.atan2(x)
+    };
+    let (dx, dy) = (a.cos(), -a.sin());
+    let (cx, cy) = (pane.w / 2.0, pane.h / 2.0);
+    // the rectangle, kept around the centre however large the insets
+    let x0 = inset.left.min(cx - 1.0);
+    let x1 = (pane.w - inset.right).max(cx + 1.0);
+    let y0 = inset.top.min(cy - 1.0);
+    let y1 = (pane.h - inset.bottom).max(cy + 1.0);
+    let reach = |d: f64, lo: f64, hi: f64, c: f64| {
+        if d > 1e-12 {
+            (hi - c) / d
+        } else if d < -1e-12 {
+            (lo - c) / d
+        } else {
+            f64::INFINITY
+        }
+    };
+    let t = reach(dx, x0, x1, cx).min(reach(dy, y0, y1, cy)).max(0.0);
+    [cx + t * dx, cy + t * dy]
+}
+
 // ---- eigen ---------------------------------------------------------------------------------
 
 /// Eigenvalues (ascending, ties by index) and unit eigenvectors of a symmetric 3×3 matrix, by
@@ -585,6 +747,158 @@ mod tests {
             let p = ease_pose(&a, &b, e);
             assert!((p.ln_d - (a.ln_d + (b.ln_d - a.ln_d) * e)).abs() < 1e-12);
         }
+    }
+
+    #[test]
+    fn classify_hysteresis() {
+        let b = bands(100.0, 400.0, 1600.0);
+        assert!((b.inner - 200.0).abs() < 1e-9 && (b.outer - 800.0).abs() < 1e-9);
+        let (f, s, g) = (Scale::Focus, Scale::System, Scale::Galaxy);
+        // within ±10% of a boundary, either scale it separates stays as it was
+        for (boundary, sides) in [(b.inner, [f, s]), (b.outer, [s, g])] {
+            for k in -10..=10 {
+                let d = boundary * (1.0 + k as f64 / 100.0);
+                for prev in sides {
+                    assert_eq!(classify(d, &b, prev, f), prev, "flip at {d} from {prev:?}");
+                }
+            }
+        }
+        // sweeping out and back in crosses each boundary once per direction, past the margins
+        let mut cur = f;
+        let mut seen = vec![cur];
+        let steps: Vec<f64> = (0..=60)
+            .map(|i| 50.0 * (1.06f64).powi(i))
+            .chain((0..=60).rev().map(|i| 50.0 * (1.06f64).powi(i)))
+            .collect();
+        for d in steps {
+            let next = classify(d, &b, cur, f);
+            if next != cur {
+                // outward crossings happen past B·HYST, inward ones below B/HYST
+                let edge = if next > cur {
+                    if next == s { b.inner } else { b.outer }
+                } else if next == f {
+                    b.inner
+                } else {
+                    b.outer
+                };
+                if next > cur {
+                    assert!(d > edge * HYST, "out at {d}");
+                } else {
+                    assert!(d < edge / HYST, "in at {d}");
+                }
+                seen.push(next);
+            }
+            cur = next;
+        }
+        assert_eq!(seen, vec![f, s, g, s, f]);
+        // a distance past both boundaries jumps straight there
+        assert_eq!(classify(5000.0, &b, f, f), g);
+        assert_eq!(classify(10.0, &b, g, f), f);
+        // the innermost cap: with no card in the active region, zooming in stops at system
+        assert_eq!(classify(10.0, &b, g, s), s);
+        assert_eq!(classify(10.0, &b, s, s), s);
+        assert_eq!(classify(10.0, &b, f, s), s);
+        assert_eq!(classify(5000.0, &b, s, s), g);
+        // bands stay ordered however close the scales' own distances are
+        let t = bands(300.0, 200.0, 250.0);
+        assert!(t.inner < t.outer && t.inner > 300.0);
+    }
+
+    #[test]
+    fn nearest_region_front_first() {
+        let pane = Pane {
+            w: 1200.0,
+            h: 800.0,
+        };
+        // looking at the origin down -z from z = 1000 (theta 0, psi 0)
+        let pose = Pose {
+            target: [0.0; 3],
+            theta: 0.0,
+            psi: 0.0,
+            ln_d: 1000f64.ln(),
+        };
+        let c = |core: V3, cards: usize, name: &'static str| Candidate { core, cards, name };
+        // in front but far off-centre (even off the pane) beats one just behind the eye
+        let far_front = c([3000.0, 0.0, 0.0], 1, "far");
+        let just_behind = c([0.0, 0.0, 1100.0], 999, "behind");
+        assert_eq!(
+            nearest_to_centre(&[just_behind, far_front], &pose, pane),
+            Some(1)
+        );
+        // among those in front, the nearest the centre in pixels wins
+        let near = c([50.0, 20.0, 0.0], 1, "near");
+        assert_eq!(
+            nearest_to_centre(&[far_front, near, just_behind], &pose, pane),
+            Some(1)
+        );
+        // nearer the eye, an equal world offset projects farther from the centre
+        let deep = c([60.0, 0.0, -400.0], 1, "deep");
+        let shallow = c([60.0, 0.0, 400.0], 1, "shallow");
+        assert_eq!(nearest_to_centre(&[shallow, deep], &pose, pane), Some(1));
+        // a tie in distance goes to the card count, then the name
+        let left = c([-100.0, 0.0, 0.0], 5, "b-left");
+        let right = c([100.0, 0.0, 0.0], 9, "c-right");
+        assert_eq!(nearest_to_centre(&[left, right], &pose, pane), Some(1));
+        let right5 = c([100.0, 0.0, 0.0], 5, "a-right");
+        assert_eq!(nearest_to_centre(&[left, right5], &pose, pane), Some(1));
+        assert_eq!(nearest_to_centre(&[right5, left], &pose, pane), Some(0));
+        // with every core behind, the one nearest the view axis by angle wins
+        let b1 = c([0.0, 300.0, 1500.0], 1, "b1");
+        let b2 = c([0.0, 30.0, 1500.0], 1, "b2");
+        assert_eq!(nearest_to_centre(&[b1, b2], &pose, pane), Some(0));
+        assert_eq!(nearest_to_centre(&[], &pose, pane), None);
+    }
+
+    #[test]
+    fn rim_points_hug_the_edge() {
+        let pane = Pane {
+            w: 1000.0,
+            h: 600.0,
+        };
+        let pose = Pose {
+            target: [0.0; 3],
+            theta: 0.0,
+            psi: 0.0,
+            ln_d: 500f64.ln(),
+        };
+        let even = Insets {
+            left: 30.0,
+            top: 30.0,
+            right: 30.0,
+            bottom: 30.0,
+        };
+        let right = rim_point([10.0, 0.0, 0.0], &pose, pane, even);
+        assert!((right[0] - 970.0).abs() < 1e-9 && (right[1] - 300.0).abs() < 1e-9);
+        let up = rim_point([0.0, 10.0, 0.0], &pose, pane, even);
+        assert!((up[0] - 500.0).abs() < 1e-9 && (up[1] - 30.0).abs() < 1e-9);
+        // behind the camera, still on the side it lies toward
+        let behind_left = rim_point([-5.0, 0.0, 900.0], &pose, pane, even);
+        assert!((behind_left[0] - 30.0).abs() < 1e-9);
+        // uneven insets (a toolbar on the left, a legend at the bottom) move the rim off them
+        let chrome = Insets {
+            left: 60.0,
+            top: 30.0,
+            right: 30.0,
+            bottom: 80.0,
+        };
+        for inset in [even, chrome] {
+            for k in 0..36 {
+                let a = k as f64 * 10.0f64.to_radians();
+                let p = rim_point([a.cos(), a.sin(), 0.0], &pose, pane, inset);
+                let (x0, x1) = (inset.left, 1000.0 - inset.right);
+                let (y0, y1) = (inset.top, 600.0 - inset.bottom);
+                let on_x = (p[0] - x0).abs() < 1e-6 || (p[0] - x1).abs() < 1e-6;
+                let on_y = (p[1] - y0).abs() < 1e-6 || (p[1] - y1).abs() < 1e-6;
+                assert!(on_x || on_y, "{p:?}");
+                assert!(p[0] >= x0 - 1e-6 && p[0] <= x1 + 1e-6);
+                assert!(p[1] >= y0 - 1e-6 && p[1] <= y1 + 1e-6);
+                // on the ray from the centre at the region's angle
+                let (vx, vy) = (p[0] - 500.0, 300.0 - p[1]);
+                assert!((vy.atan2(vx) - a.sin().atan2(a.cos())).abs() < 1e-9, "{k}");
+            }
+        }
+        let down = rim_point([0.0, -10.0, 0.0], &pose, pane, chrome);
+        assert!((down[1] - 520.0).abs() < 1e-9);
     }
 
     #[test]
