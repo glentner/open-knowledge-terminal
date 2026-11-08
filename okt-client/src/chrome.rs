@@ -488,7 +488,9 @@ pub fn show_help() {
         ("[ ]", "back, forward"),
         ("↑ ↓ ⏎", "move and open in lists (j k move too)"),
         ("space", "files: open or close a folder, or show a file in the graph"),
-        ("+ − 0", "zoom in, out, fit"),
+        ("← →", "graph: orbit the camera around what it looks at"),
+        ("PageUp PageDown", "graph: tilt the camera up, down"),
+        ("+ − 0", "graph: camera closer, farther; fit the whole graph"),
         ("R", "rebuild the index"),
         ("esc", "close, then clear the selection"),
         ("?", "this help"),
@@ -525,7 +527,7 @@ pub fn show_help() {
     dom::set_html(
         &el,
         &format!(
-            "<div class=\"helpbox\"><h3>OK TERMINAL · HELP</h3>\n    <div><h4>KEYS</h4><dl>{kd}</dl>\n    <h4>GRAPH</h4><dl><dt>click</dt><dd>shine a light on a node and everything it touches</dd><dt>double-click</dt><dd>expand or collapse a folder; empty space fits</dd><dt>drag, wheel</dt><dd>pan, zoom</dd><dt>accent arrows</dt><dd>links out; pale lines are links in</dd><dt>dashed</dt><dd>connections to external systems</dd></dl>\n    <h4>PINS</h4><dl>{pins}</dl></div>\n    <div><h4>COMMANDS</h4><dl>{cd}</dl></div>\n    <div class=\"full\">Anything else you type opens the best-matching file or folder; a commit hash opens that commit; if nothing matches it runs FIND. The terminal is read-only; EDIT, OPEN and REVEAL hand the file to your apps.</div></div>"
+            "<div class=\"helpbox\"><h3>OK TERMINAL · HELP</h3>\n    <div><h4>KEYS</h4><dl>{kd}</dl>\n    <h4>GRAPH</h4><dl><dt>click</dt><dd>select a node; its links light up</dd><dt>double-click</dt><dd>expand or collapse a folder; empty space fits the whole graph</dd><dt>drag</dt><dd>orbit the camera</dd><dt>wheel, pinch</dt><dd>move the camera closer or farther</dd><dt>accent lines</dt><dd>links out; pale lines are links in</dd><dt>rings</dt><dd>records and external systems</dd></dl>\n    <h4>PINS</h4><dl>{pins}</dl></div>\n    <div><h4>COMMANDS</h4><dl>{cd}</dl></div>\n    <div class=\"full\">Anything else you type opens the best-matching file or folder; a commit hash opens that commit; if nothing matches it runs FIND. The terminal is read-only; EDIT, OPEN and REVEAL hand the file to your apps.</div></div>"
         ),
     );
     dom::set_hidden(&el, false);

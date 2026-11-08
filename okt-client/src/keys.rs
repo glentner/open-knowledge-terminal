@@ -430,6 +430,27 @@ fn on_key(e: KeyboardEvent) {
             e.prevent_default();
             return;
         }
+        // orbit the camera (README § Keys): only while focus is on the page, so a focused
+        // inspector or input keeps its own arrow and page keys
+        let orbit = match k.as_str() {
+            "ArrowLeft" => Some((-graph::ORBIT_DEG, 0.0)),
+            "ArrowRight" => Some((graph::ORBIT_DEG, 0.0)),
+            "PageUp" => Some((0.0, graph::TILT_DEG)),
+            "PageDown" => Some((0.0, -graph::TILT_DEG)),
+            _ => None,
+        };
+        if let Some((d_theta, d_psi)) = orbit {
+            let elsewhere = dom::active_element().is_some_and(|a| {
+                let tag = a.tag_name().to_lowercase();
+                a.closest("#insp").ok().flatten().is_some()
+                    || matches!(tag.as_str(), "input" | "textarea" | "select")
+            });
+            if !elsewhere {
+                graph::orbit_by(d_theta, d_psi);
+                e.prevent_default();
+                return;
+            }
+        }
     }
     let handled = match k.as_str() {
         "g" => {
@@ -570,11 +591,11 @@ fn on_key(e: KeyboardEvent) {
             true
         }
         "+" | "=" => {
-            graph::zoom_by(1.35, None);
+            graph::zoom_by(1.35);
             true
         }
         "-" => {
-            graph::zoom_by(1.0 / 1.35, None);
+            graph::zoom_by(1.0 / 1.35);
             true
         }
         _ => false,

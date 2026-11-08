@@ -23,11 +23,14 @@ cost and frame pacing, and `tests/perf/compare.py` compares two runs. They need 
   linkify, punycode, highlighting via okt-pygments), `http.rs` (routes, CSP, gzip), `watch.rs`,
   `pwa.rs`, `launch.rs` (editor/open/reveal), `main.rs` (CLI, detach/stop).
 - `okt-client/src`: one module per pane or concern (`graph`, `views/*`,
-  `insp`, `go`, `chrome`, `live`, `nav`, `keys`, `actions`); `js.rs` holds the JavaScript
+  `insp`, `go`, `chrome`, `live`, `nav`, `keys`, `actions`); `graph/` holds the graph's
+  submodules (the pure `space` layout and `cam` camera math, the WebGL2 `gl` renderer, the flat
+  `overlay`); `js.rs` holds the JavaScript
   semantics the output depends on (number formatting, `toFixed`, `localeCompare`, object key
   order, UTF-16 lengths); `state.rs` holds `S`, settings (localStorage `okt:<kb>`) and the boot data.
-- `okt-client/static`: the page, `app.css` (the stylesheet; the graph rules in it are
-  the spec `graph.rs` paints from, so change both together), `main.js` (loader).
+- `okt-client/static`: the page, `app.css` (the stylesheet; its graph tokens and rules are
+  the spec `graph.rs` and `okt-client/src/graph/` paint from, so change them together), `main.js`
+  (loader).
 - `okt-pygments`: the highlighter; its `data/pygments.json` is generated (§ Invariants 2).
 
 ## Factory
@@ -50,7 +53,7 @@ flight, `issues/` and `ROADMAP.md` for deferred work. Inside this repo, its own 
 | setup | `make client && cargo build --profile fast -p okt-server`; the browser suites also need `npm install` in `tests/` once |
 | verify | `cargo test -p okt-server -p okt-pygments -p okt-client`, plus `tests/ui/keys.mjs` inside the throwaway environment when the change touches the client; the release recipe's `gate` before a release |
 | throwaway environment | `tests/env.sh <cmd…>` (contract below) |
-| coupled core | `okt-client/static/app.css` with `okt-client/src/graph.rs`; `okt-client/src/state.rs`; `okt-server/src/index.rs` |
+| coupled core | `okt-client/static/app.css` with `okt-client/src/graph.rs` and `okt-client/src/graph/`; `okt-client/src/state.rs`; `okt-server/src/index.rs` |
 | same-commit rules | see § Conventions |
 | high-blast-radius paths | see § Invariants |
 | security lane | off |
@@ -162,8 +165,9 @@ never remove the old entry. Skills and templates cite this list and never copy i
 
 - Commit subjects are `[area] what changed` (areas: `server`, `client`, `pygments`, `tests`,
   `build`, `docs`, `vendor`). No trailers. Never push without being asked.
-- `okt-client/static/app.css` and `okt-client/src/graph.rs` change together: the graph rules in
-  the stylesheet are the spec `graph.rs` paints from.
+- `okt-client/static/app.css` changes together with `okt-client/src/graph.rs` and
+  `okt-client/src/graph/`: the graph tokens and rules in the stylesheet are the spec they paint
+  from.
 - The version lives only at the release recipe's `version.source`; the recipe's `gate` is the full pre-release check (there is no CI).
 - No spec R#/P# ids in source code.
 - Point to a rule; don't restate it. A rule restated in N places is a same-commit obligation in

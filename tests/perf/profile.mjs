@@ -1,8 +1,111 @@
 // Main-thread cost and frame pacing of a fixed set of interactions in okt.
 //   node tests/perf/profile.mjs <url> <label> [width height dpr]
 // Writes results-<label>.json. Run two builds and compare (tests/perf/compare.py).
+//
+//   node tests/perf/profile.mjs --graph [--headless]
+// The graph's frame time, with a verdict: the camera orbiting by keys, by tilt keys and by a
+// circular drag ("orbit"), then the same with every card drawn ("orbit_all"). It targets $OKT
+// only (tests/env.sh sets it; never 6580), runs headed in a 1600x1000 window at DPR 2, calibrates
+// the display's refresh for 1 s and warms up with one untimed orbit. It prints target=, mode=,
+// renderer=, refresh_ms=, one JSON line per scenario ({"scenario","frames","draws","p50","p95",
+// "max"}, frames being the rAF intervals and draws the graph's own drawn frames), then
+// "PASS <scenario> p95=<x> <= 16.7" or "FAIL ...". Exit 1 on a FAIL or a page error; 2 when $OKT
+// is unset or names 6580. --headless prints the numbers with no verdict (headless Chromium draws
+// WebGL in software at 60 Hz, so its p95 says nothing about the display).
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 import fs from 'node:fs';
+
+if (process.argv.includes('--graph')) process.exit(await graphFrameTime());
+
+async function graphFrameTime() {
+  const OKT = process.env.OKT || '';
+  if (!OKT || /:6580(\/|$)/.test(OKT)) { console.error('profile --graph: set OKT to the tests/env.sh server (never 6580)'); return 2; }
+  const headless = process.argv.includes('--headless');
+  const BOUND = 16.7;
+  const errors = [];
+  const browser = await chromium.launch({ headless, args: ['--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling'] });
+  try {
+    const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2 });
+    // in the page: rAF intervals and the graph's drawn frames, recorded while __rec is set
+    await ctx.addInitScript(() => {
+      window.__rec = false; window.__iv = []; window.__draws = 0; window.__oktDraw = [];
+      let last = 0;
+      const loop = t => {
+        if (window.__rec) {
+          if (last) window.__iv.push(t - last);
+          window.__draws += window.__oktDraw.length;
+          last = t;
+        } else last = 0;
+        window.__oktDraw.length = 0;
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+    });
+    const page = await ctx.newPage();
+    page.on('pageerror', e => errors.push(e.message));
+    await page.goto(OKT + '#v=graph', { waitUntil: 'load' });
+    await page.waitForFunction(() => document.getElementById('graph')?.getAttribute('data-dist'), null, { timeout: 30000 });
+    await page.bringToFront();
+    const renderer = await page.evaluate(() => {
+      const gl = document.createElement('canvas').getContext('webgl2');
+      const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+      return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : (gl ? gl.getParameter(gl.RENDERER) : 'none');
+    });
+    const pct = (a, p) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
+    const record = async fn => {
+      await page.evaluate(() => { window.__iv = []; window.__draws = 0; window.__rec = true; });
+      await fn();
+      await page.waitForTimeout(150);
+      return page.evaluate(() => { window.__rec = false; return { iv: window.__iv, draws: window.__draws }; });
+    };
+    // refresh: the median frame interval of an idle second
+    const idle = await record(() => page.waitForTimeout(1000));
+    const refresh = +pct(idle.iv, 0.5).toFixed(1);
+    console.log(`target=${OKT}`);
+    console.log(`mode=${headless ? 'headless' : 'headed'}`);
+    console.log(`renderer=${renderer}`);
+    console.log(`refresh_ms=${refresh}`);
+    const box = await page.locator('#graph').boundingBox();
+    const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+    const press = async (k, ms) => { const t1 = Date.now() + ms; while (Date.now() < t1) { await page.keyboard.press(k); await page.waitForTimeout(16); } };
+    const orbit = async () => {
+      await press('ArrowRight', 2500);
+      await press('PageUp', 500);
+      await press('PageDown', 500);
+      // a circular drag, about 2 s, a pointer move at a time
+      const r = Math.min(box.width, box.height) * 0.3;
+      await page.mouse.move(cx + r, cy);
+      await page.mouse.down();
+      const t1 = Date.now() + 2000;
+      for (let i = 0; Date.now() < t1; i++) {
+        const a = i * 0.05;
+        await page.mouse.move(cx + r * Math.cos(a), cy + r * Math.sin(a));
+      }
+      await page.mouse.up();
+    };
+    // warm-up: one untimed orbit (shaders, JIT)
+    await press('ArrowRight', 1000);
+    let fail = false;
+    for (const name of ['orbit', 'orbit_all']) {
+      // every card is drawn already; a show-all toggle, when the toolbar has one, is switched on
+      if (name === 'orbit_all') {
+        const all = page.locator('.gtools [data-z=all]');
+        if (await all.count() && !(await all.evaluate(b => b.classList.contains('on')))) await all.click();
+        await page.waitForTimeout(300);
+      }
+      const r = await record(orbit);
+      const out = { scenario: name, frames: r.iv.length, draws: r.draws, p50: +pct(r.iv, 0.5).toFixed(1), p95: +pct(r.iv, 0.95).toFixed(1), max: +Math.max(0, ...r.iv).toFixed(1) };
+      console.log(JSON.stringify(out));
+      if (headless) continue;
+      if (out.p95 <= BOUND) console.log(`PASS ${name} p95=${out.p95} <= ${BOUND}`);
+      else { console.log(`FAIL ${name} p95=${out.p95} > ${BOUND}`); fail = true; }
+    }
+    if (errors.length) { console.log('FAIL page errors: ' + errors.slice(0, 3).join(' | ')); fail = true; }
+    return fail ? 1 : 0;
+  } finally {
+    await browser.close();
+  }
+}
 
 const TARGET = process.argv[2] || 'http://127.0.0.1:6580/';
 const LABEL = process.argv[3] || 'okt';

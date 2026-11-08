@@ -216,10 +216,3 @@ pub fn css_var(name: &str) -> String {
         .map(|v| v.trim().to_string())
         .unwrap_or_default()
 }
-
-/// `#rrggbb` (any case) to `rgba(r,g,b,a)` for canvas gradients.
-pub fn hex_alpha(hex: &str, a: f64) -> String {
-    let h = hex.trim_start_matches('#');
-    let p = |i: usize| i64::from_str_radix(h.get(i..i + 2).unwrap_or("00"), 16).unwrap_or(0);
-    format!("rgba({},{},{},{})", p(0), p(2), p(4), a)
-}

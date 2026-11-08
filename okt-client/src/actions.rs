@@ -194,6 +194,7 @@ pub fn set_accent(a: &str) {
     cfg_mut().accent = v;
     save_settings();
     theme::apply_theme();
+    graph::recolor();
     chrome::render_settings();
 }
 

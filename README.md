@@ -6,9 +6,9 @@ inspector that renders each file, its history, and its blame. It watches the rep
 updates itself as files are saved and commits land.
 
 The server is one native binary that indexes the repository, serves a JSON API and server-sent
-events, and embeds the client. The client is Rust compiled to WebAssembly. It draws the graph on a
-canvas and updates lists in place instead of re-rendering them, so panning, zooming, hovering and
-arrowing through lists stay at frame rate.
+events, and embeds the client. The client is Rust compiled to WebAssembly. It draws the graph in
+3D with WebGL and updates lists in place instead of re-rendering them, so orbiting, zooming,
+hovering and arrowing through lists stay at frame rate.
 
 ## Install
 
@@ -79,7 +79,10 @@ yet; `ROADMAP.md` tracks them.
 - GRAPH: `j`/`k` step through the selection's connections in the order the inspector lists them
   (a dashed ring, the card and the hint show where), Enter or space goes there, esc stops; with no
   walk, space opens or closes the selected folder and Enter shows a file's content; `z` zooms to
-  the selection and its neighbors.
+  the selection and its neighbors. The camera: ←/→ orbit it around what it looks at and
+  PageUp/PageDown tilt it, while focus is on the page rather than the inspector; `+`/`=` and `-`
+  move it closer and farther, and `0` fits the whole graph, keeping the selection; dragging
+  orbits, and the wheel or a pinch moves it closer or farther.
 - Anywhere: `J`/`K` scroll the inspector, `s` switches between source and rendered, `y` copies the
   path, `m` pins the selection and `1`–`9` go to the pins (kept per KB), `n`/`N` step through FIND
   matches and on into the next or previous result file, and `E`/`O`/`F` edit, open and reveal, as

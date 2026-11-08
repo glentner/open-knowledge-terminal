@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feat/graph-galaxy
 base: main
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-08'
 phases:
 - id: P1
@@ -22,7 +22,7 @@ phases:
   verify: sh spec/graph-galaxy/verify/gate.sh P1
 - id: P2
   name: WebGL2 scene and the orbit camera
-  status: pending
+  status: done
   satisfies:
   - R7
   - R11
@@ -254,10 +254,10 @@ depth cues, under a spherical camera.
 - It has hooks, picking, reduced-motion cuts and context-loss recovery.
 - The headed `orbit` and `orbit_all` scenarios hold p95 ≤ 16.7 ms.
 
-- [ ] `okt-client/Cargo.toml`: add the web-sys features `WebGl2RenderingContext`, `WebGlProgram`,
+- [x] `okt-client/Cargo.toml`: add the web-sys features `WebGl2RenderingContext`, `WebGlProgram`,
       `WebGlShader`, `WebGlBuffer`, `WebGlUniformLocation`, `WebGlVertexArrayObject`,
       `WebGlContextAttributes`, `WebGlContextEvent`, `WebglLoseContext`.
-- [ ] `graph/cam.rs` (pure): the pose, basis, `project`, `view_proj`, Jacobi, easing, wheel
+- [x] `graph/cam.rs` (pure): the pose, basis, `project`, `view_proj`, Jacobi, easing, wheel
       normalisation, and `cam_to`'s pose math. This phase's tests:
   - `basis_orthonormal`: orthonormal, right-handed, up.y > 0 over a θ/ψ grid.
   - `project_matches_matrices`: `project` equals `P·V` within 1e-9, and the target maps to the pane
@@ -267,15 +267,15 @@ depth cues, under a spherical camera.
   - `wrap_pi_short_arc`.
   - `wheel_delta_modes`: line, page, ctrl factors and the clamp.
   - `ease_endpoints_and_monotone`: smootherstep endpoints exact and monotone; `ln d` linear.
-- [ ] `graph/gl.rs`:
+- [x] `graph/gl.rs`:
   - programs, VAO, instanced quads for points (sorted back to front per frame), line quads for edges,
     premultiplied blending, uniforms per frame;
   - instance re-upload only on a tier change;
   - `webglcontextlost` and `webglcontextrestored`;
   - writes the drawn-state hooks.
-- [ ] `graph/overlay.rs`: a pointer-transparent second canvas over `#graph`, sized to the pane at DPR.
+- [x] `graph/overlay.rs`: a pointer-transparent second canvas over `#graph`, sized to the pane at DPR.
       This phase draws only the hover state.
-- [ ] `graph.rs`:
+- [x] `graph.rs`:
   - **Retire:** the radial layout (`fn layout(idx: &Idx)`, `polar`, `R_TOP`, `dr_dir`,
     `label_geom`), the 2D scene context, the ring guides and the spotlight layers.
   - **Camera:** `G` gains `pose`, `CamAnim` and `autofit`. Every move goes through one
@@ -294,23 +294,23 @@ depth cues, under a spherical camera.
     `window.__oktDraw` is kept.
   - **Colours:** `Colors::read` is canonicalised through the overlay `fillStyle`. An accent change
     rebuilds the colours.
-- [ ] `keys.rs` graph block (before the global match, after the walk arms):
+- [x] `keys.rs` graph block (before the global match, after the walk arms):
   - ArrowLeft/ArrowRight turn the azimuth ±15° and PageUp/PageDown tilt ±10°, each eased over 140 ms,
     only while the graph view is active and `document.activeElement` is neither inside `#insp` nor an
     input. Otherwise the key falls through, so a focused inspector scrolls natively (row D1).
   - ArrowUp/ArrowDown keep walking.
   - `+`/`=` and `-` act on `ln d`; `0` is the galaxy fit.
-- [ ] `app.css` graph block:
+- [x] `app.css` graph block:
   - retire `.spotlit`, `.ebase`, `.ehot`, `.ring-guide` and `.n .lab`;
   - add the overlay canvas rule and the colour tokens the GL reads;
   - keep `.gtools`, `.glegend` and `.gtip`.
-- [ ] Docs:
+- [x] Docs:
   - `README.md` § Keys, and the `chrome.rs` `?` list and GRAPH `<dl>`: ←/→ orbit, PageUp/PageDown
     tilt, `+`/`=`/`−`/`0` on camera distance, drag orbits, wheel and pinch zoom.
   - `README.md:9-11` loses "radial" and "panning".
   - `AGENTS.md` Map and profile: the coupled core names `okt-client/src/graph/` (row D9).
-- [ ] `tests/ui/keys.mjs`: the P2 rows of `verify/checks.txt`.
-- [ ] `tests/perf/profile.mjs`: add a `--graph` mode, parsed before `points.json` is read; the legacy
+- [x] `tests/ui/keys.mjs`: the P2 rows of `verify/checks.txt`.
+- [x] `tests/perf/profile.mjs`: add a `--graph` mode, parsed before `points.json` is read; the legacy
       mode is untouched.
   - **Target:** `process.env.OKT` only, never argv. It exits 2 when `OKT` is unset or names 6580.
   - **Browser:** headed by default (`--headless` prints numbers with no verdict), with
@@ -323,8 +323,32 @@ depth cues, under a spherical camera.
       already.
   - **Recording:** rAF intervals and `__oktDraw` counts, in the page.
   - **Exit:** 1 on any FAIL or any page error. The browser closes in `finally`.
-- [ ] Seed `issues/graph-zoom-to-cursor.md` (`unshaped`, from the ISSUE template) and its
+- [x] Seed `issues/graph-zoom-to-cursor.md` (`unshaped`, from the ISSUE template) and its
       `ROADMAP.md` entry: zoom about the pointer, the alternative row D3 deferred.
+- *Amended in build (2026-11-08):*
+  - `Cargo.toml` also takes `WebGlTexture`. Each node's position, radius, colour and style live in
+    two RGBA32F textures that the instanced quads read with `texelFetch`, so a frame uploads only
+    its uniforms and the sorted point order (one `u32` per point). Edges are instanced line quads
+    that read both ends from the same texture.
+  - `window.__oktPos` is filled from the uploaded (f32) positions on every upload, and the upload
+    runs at build and on a selection change, not at the next frame, so the hook is current while
+    the graph is hidden. `publish_space` keeps only `data-layout` and `data-total`.
+  - `focus_node(id, d)` keeps its name; its second argument is now a camera distance.
+    `zoom_by(f)` drops the 2D anchor argument (the `keys.rs` callers change with it).
+  - Drag and wheel are moves too: they go through `cam_to` as cuts, so they bump `data-move`.
+  - `data-scale` reads `focus` with a selection and `galaxy` without. `data-drawn` counts the
+    cards in front of the near plane, so close to a card, cards behind the camera are not counted.
+  - Collapse draws nothing different until P4 (row D12): every card is drawn. `rep_of` and the
+    collapse settings keep their meaning for E, space and EXPAND/COLLAPSE, and the legend's
+    collapsed-folder note gives way to the orbit and zoom hints.
+  - The "ALL LABELS" toggle still flips its setting and button, and draws nothing until P3
+    replaces it with show all.
+  - `theme.rs` loses `hex_alpha`, dead since the spotlight retired (outside the Touches list).
+  - `profile.mjs --graph` drains `window.__oktDraw` every frame, because the client keeps only
+    its last 600 entries and a scenario runs longer. Its drag is a pointer move at a time, so the
+    graph draws on nearly every frame.
+  - In `keys.mjs`, a screenshot's "colours" are 4-bit-per-channel buckets, and the screenshot also
+    hides `.gtools`, `#glegend`, `#ghint` and `#gtip`, so only the GL canvas counts.
 - **Verify:** `sh spec/graph-galaxy/verify/gate.sh P2`.
 - **Touches:** `okt-client/Cargo.toml`, `okt-client/src/graph.rs`,
   `okt-client/src/graph/{cam,gl,overlay}.rs`, `okt-client/src/keys.rs`, `okt-client/src/chrome.rs`,

@@ -66,6 +66,13 @@ History rows are two lines tall. Make them one line under the Log's day rules.
 
 **Seed:** [`issues/history-log-rows.md`](issues/history-log-rows.md)
 
+### 6. Zoom toward the pointer in the 3D graph
+
+The 3D graph zooms about the camera's target, so zooming into something off-centre means selecting
+it or orbiting first. Zoom toward what is under the pointer without losing the stable orbit centre.
+
+**Seed:** [`issues/graph-zoom-to-cursor.md`](issues/graph-zoom-to-cursor.md)
+
 ---
 
 ## Settled questions

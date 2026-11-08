@@ -1,8 +1,9 @@
 /* Open Knowledge Terminal. Three themes share one set of tokens: terminal (black + one accent,
    monochrome graph), dark and light (graphite and paper, rainbow families). The accent is
    user-chosen; the client derives --accent-2/-dim/-ink/-text and, in the terminal theme, the
-   family shades. The graph is painted on a canvas; its .n/.lab/.ebase/.ehot rules below are the
-   specification graph.rs paints from (keep the two in step). */
+   family shades. The graph is drawn by WebGL; its colour tokens (--graph-*, --edge-hot, the
+   --f-* families, the accent) and the graph block below are the specification graph.rs and
+   graph/ paint from (keep them in step). */
 
 :root {
   /* Berkeley Mono when it's installed (the static or the variable family), then the usual suspects.
@@ -21,6 +22,9 @@
   --fs: 12.5px;
   --reader: var(--mono);
   --ticker-h: 22px;
+  /* the graph: far cards fade toward the fog; the selection's halo */
+  --graph-fog: var(--graph-bg);
+  --graph-halo: var(--accent);
 }
 
 :root[data-theme="terminal"] {
@@ -41,6 +45,7 @@
   --edge: rgba(232, 230, 225, .07);
   --edge-tree: rgba(232, 230, 225, .06);
   --edge-hot: rgba(232, 230, 225, .55);
+  --graph-edge: rgba(232, 230, 225, .16);
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -60,6 +65,7 @@
   --edge: rgba(236, 235, 231, .08);
   --edge-tree: rgba(236, 235, 231, .07);
   --edge-hot: rgba(236, 235, 231, .6);
+  --graph-edge: rgba(236, 235, 231, .16);
   --f-core: #b8892c; --f-cards: #3f86d6; --f-rules: #d8643a; --f-memory: #16a192;
   --f-records: #a06fcf; --f-workspace: #5f9f2c; --f-world: #d9538f; --f-other: #8a8f98;
 }
@@ -81,6 +87,7 @@
   --edge: rgba(24, 24, 26, .09);
   --edge-tree: rgba(24, 24, 26, .08);
   --edge-hot: rgba(24, 24, 26, .62);
+  --graph-edge: rgba(24, 24, 26, .16);
   --up: #1c8a4a;
   --down: #c8322f;
   --warn: #9a6a00;
@@ -167,8 +174,9 @@ a { color: inherit; }
 #v-graph { background: var(--graph-bg); }
 #graph { width: 100%; height: 100%; display: block; cursor: grab; user-select: none; touch-action: none; }
 #graph.onnode { cursor: pointer; }
-#graph.panning { cursor: grabbing; }
-#graph text { font-family: var(--mono); }
+#graph.orbiting { cursor: grabbing; }
+/* the flat overlay over the GL canvas: hover and walk rings; never takes the pointer */
+#goverlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .gtools { position: absolute; left: 10px; top: 10px; display: flex; flex-direction: column; gap: 3px; }
 .gtools button { width: 26px; height: 24px; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink-2); font-size: 12px; }
 .gtools button:hover, .gtools button.on { border-color: var(--accent); color: var(--accent-text); }
@@ -179,44 +187,7 @@ a { color: inherit; }
 .gtip b { color: var(--ink); display: block; font-weight: 600; }
 .gtip .p { color: var(--accent-text); }
 .gtip .m { color: var(--dim); }
-.n { cursor: pointer; }
-.n .lab { font-size: 10.5px; fill: var(--ink-2); paint-order: stroke; stroke: var(--graph-bg); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; opacity: 0; dominant-baseline: central; transform: rotate(var(--rot, 0deg)) scale(var(--ls, 1)); }
-.n.dir .lab, .n.root .lab, .n.surf .lab, .n.cluster .lab { fill: var(--ink); font-weight: 600; }
-.n.dir.d1 .lab { font-size: 12px; letter-spacing: .03em; }
-.n.dir:not(.d1) .lab { font-size: 11px; fill: var(--ink-2); }
-.n.surf .lab { font-size: 12px; fill: var(--accent-text); }
-.n.root .lab { font-size: 13px; font-weight: 800; fill: var(--accent-text); }
-.n.lv .lab { opacity: 1; }
-.n.file.lv:not(.sel):not(.nbr) .lab { opacity: .85; }
-.n:hover .lab { opacity: 1; }
 .md td code, .md th code { white-space: nowrap; }
-.n.sel .lab { fill: var(--accent-text); font-weight: 700; }
-.n .shape { stroke: var(--graph-bg); stroke-width: 1.2; }
-.n.dir .shape, .n.root .shape { stroke-width: 1.5; }
-.n.surf .shape { fill: var(--graph-bg); stroke-width: 2; }
-.n.cluster .ring { fill: none; stroke-dasharray: 3 2.5; stroke-width: 1.4; }
-.n .cnt { font-size: 8.5px; font-weight: 700; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
-.n .cnt.c3 { font-size: 7.5px; letter-spacing: -.04em; }
-.n.dirty .dot { fill: var(--warn); }
-.n .halo { fill: none; stroke: var(--accent); stroke-width: 2; opacity: 0; }
-.n.sel .halo { opacity: 1; }
-.n.hit .halo { opacity: .8; stroke-dasharray: 2 2; }
-.n.flash .halo { animation: flash 1.6s ease-out 2; opacity: 0; }
-@keyframes flash { 0% { opacity: 1; stroke-width: 6; } 100% { opacity: 0; stroke-width: 1; } }
-.spotlit .n:not(.sel):not(.nbr) { opacity: .16; }
-.spotlit .n.dir.d1:not(.sel):not(.nbr), .spotlit .n.surf:not(.sel):not(.nbr) { opacity: .4; }
-.spotlit .ebase { opacity: .35; }
-.ebase { fill: none; }
-.ebase.tree { stroke: var(--edge-tree); stroke-width: .8; }
-.ebase.link { stroke: var(--edge); stroke-width: .7; }
-.ebase.surface { stroke: var(--edge); stroke-width: .7; stroke-dasharray: 2 3; }
-.ehot { fill: none; stroke-width: 1.4; opacity: .95; }
-.ehot.out { stroke: var(--accent); }
-.ehot.in { stroke: var(--edge-hot); }
-.ehot.surface { stroke-dasharray: 4 3; }
-.ehot.tree { stroke: var(--edge-hot); stroke-width: 1; opacity: .5; }
-.ring-guide { fill: none; stroke: var(--line); stroke-width: .6; stroke-dasharray: 1 5; }
-#spot { pointer-events: none; }
 
 /* ---------- files tree ---------- */
 .tree, .ltable, .tgrid, .list { flex: 1; overflow: auto; outline: 0; min-height: 0; }

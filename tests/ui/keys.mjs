@@ -5,6 +5,10 @@
 //          space with no walk opens or closes the selected folder; z frames the selection
 //   ANY    J/K scroll the inspector, s source/rendered, y copies the path, m and 1-9 pins,
 //          n/N FIND matches, E/O/F edit/open/reveal (the request is intercepted, nothing opens)
+//   CAMERA the WebGL scene and its camera: the canvas draws, orbit keys turn by fixed steps and
+//          leave the layout, the selection and a focused inspector alone, + = - 0 act on the
+//          distance, drag orbits, wheel and pinch zoom, moves ease (and cut under reduced
+//          motion), and the scene comes back after a lost GL context
 //   LAYOUT the 3D layout: stable across a shuffled reload, and adding cards (written into the
 //          env.sh clone, $OKT_KB) moves nothing outside their folders
 //   node tests/ui/keys.mjs [okt-url]
@@ -30,8 +34,22 @@ const word = hub.split('/').pop().replace(/\.md$/, '').split(/[_-]/)[0];
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 }, permissions: ['clipboard-read', 'clipboard-write'] });
-// window.__oktPos, installed empty: the client fills it with {id: [x, y, z]} on every layout build
-await ctx.addInitScript(() => { window.__oktPos = {}; });
+// window.__oktPos, installed empty: the client fills it with {id: [x, y, z]} on every upload of
+// the positions it draws. window.__tl, the timeline: every write of the camera hooks on #graph,
+// with performance.now(), recorded by a MutationObserver from the first frame on.
+const hooks = () => {
+  window.__oktPos = {};
+  window.__tl = [];
+  const watch = () => {
+    const g = document.getElementById('graph');
+    if (!g) return false;
+    new MutationObserver(ms => { for (const m of ms) window.__tl.push([performance.now(), m.attributeName, g.getAttribute(m.attributeName)]); })
+      .observe(g, { attributes: true, attributeFilter: ['data-theta', 'data-psi', 'data-dist', 'data-anim', 'data-labels'] });
+    return true;
+  };
+  if (!watch()) document.addEventListener('DOMContentLoaded', watch);
+};
+await ctx.addInitScript(hooks);
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', e => errors.push(e.message));
@@ -187,6 +205,235 @@ check('n moves to the next match', st.sel !== first.sel || st.cur > first.cur, {
 await key('N', 900);
 st = await state();
 check('N moves back', st.sel === first.sel && st.cur === first.cur, { first, now: { sel: st.sel, cur: st.cur } });
+
+// ---- CAMERA ---------------------------------------------------------------------------------
+const { inflateSync } = await import('node:zlib');
+// a PNG (8-bit RGB or RGBA, as Chromium writes them) to raw pixels
+const decodePng = buf => {
+  let o = 8, w = 0, h = 0, ct = 6;
+  const idat = [];
+  while (o < buf.length) {
+    const len = buf.readUInt32BE(o), type = buf.toString('ascii', o + 4, o + 8), data = buf.subarray(o + 8, o + 8 + len);
+    if (type === 'IHDR') { w = data.readUInt32BE(0); h = data.readUInt32BE(4); ct = data[9]; }
+    else if (type === 'IDAT') idat.push(data);
+    else if (type === 'IEND') break;
+    o += 12 + len;
+  }
+  const bpp = ct === 6 ? 4 : 3, stride = w * bpp, raw = inflateSync(Buffer.concat(idat)), px = Buffer.alloc(h * stride);
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)], src = y * (stride + 1) + 1, dst = y * stride;
+    for (let x = 0; x < stride; x++) {
+      const a = x >= bpp ? px[dst + x - bpp] : 0, b = y > 0 ? px[dst - stride + x] : 0, c = x >= bpp && y > 0 ? px[dst - stride + x - bpp] : 0;
+      let v = raw[src + x];
+      if (f === 1) v += a; else if (f === 2) v += b; else if (f === 3) v += (a + b) >> 1;
+      else if (f === 4) { const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c); v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c; }
+      px[dst + x] = v & 255;
+    }
+  }
+  return { w, h, bpp, px };
+};
+// #graph alone, with the overlay canvas and the chrome over it hidden: its colours (4 bits per
+// channel) each covering more than 1% of the pixels, and the pixels themselves
+const shot = async (pg = page) => {
+  const hide = ['#goverlay', '.gtools', '#glegend', '#ghint', '#gtip'];
+  await pg.evaluate(h => h.forEach(s => document.querySelectorAll(s).forEach(e => { e.dataset.vis = e.style.visibility; e.style.visibility = 'hidden'; })), hide);
+  const buf = await pg.locator('#graph').screenshot();
+  await pg.evaluate(h => h.forEach(s => document.querySelectorAll(s).forEach(e => { e.style.visibility = e.dataset.vis || ''; })), hide);
+  const { w, h, bpp, px } = decodePng(buf);
+  const count = new Map();
+  for (let i = 0; i < w * h; i++) { const k = (px[i * bpp] >> 4) << 8 | (px[i * bpp + 1] >> 4) << 4 | (px[i * bpp + 2] >> 4); count.set(k, (count.get(k) || 0) + 1); }
+  return { colours: [...count.values()].filter(c => c > w * h * 0.01).length, px };
+};
+const gattrOf = (pg, name) => pg.evaluate(n => document.getElementById('graph').getAttribute(n), name);
+const twoFrames = pg => pg.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+// "waits": data-move changes from its value before the action, then data-anim is "0" (two frames
+// in between, so the "0" read is one the move's own frames wrote)
+const waits = async (act, pg = page) => {
+  const m0 = await gattrOf(pg, 'data-move');
+  await act();
+  await pg.waitForFunction(m => document.getElementById('graph').getAttribute('data-move') !== m, m0, { timeout: 5000 }).catch(() => {});
+  await twoFrames(pg);
+  await pg.waitForFunction(() => document.getElementById('graph').getAttribute('data-anim') === '0', null, { timeout: 5000 }).catch(() => {});
+};
+const cam = async (pg = page) => {
+  const v = await pg.evaluate(() => { const g = document.getElementById('graph'); return ['data-theta', 'data-psi', 'data-dist', 'data-move', 'data-layout', 'data-pos-hash', 'data-dist-galaxy'].map(k => g.getAttribute(k)); });
+  return { theta: +v[0], psi: +v[1], dist: +v[2], move: v[3], layout: v[4], posHash: v[5], galaxy: +v[6], sel: decodeURIComponent((await pg.evaluate(() => location.hash)).match(/[#&]s=([^&]*)/)?.[1] || '') };
+};
+const dang = (a, b) => ((b - a + 540) % 360) - 180;
+const tlLen = (pg = page) => pg.evaluate(() => window.__tl.length);
+const tlFrom = (i, pg = page) => pg.evaluate(i => window.__tl.slice(i), i);
+// a move's writes of one hook: how many came before its end value, and the time they span
+const eased = (tl, attr) => {
+  const w = tl.filter(e => e[1] === attr);
+  if (w.length < 2) return { mid: 0, span: 0, writes: w.length };
+  return { mid: w.length - 1, span: +(w[w.length - 1][0] - w[0][0]).toFixed(1), writes: w.length };
+};
+
+await go('#v=graph&s=' + encodeURIComponent(hub));
+await page.evaluate(() => document.activeElement?.blur());
+{
+  const a = await shot();
+  await waits(() => page.keyboard.press('ArrowRight'));
+  const b = await shot();
+  const differs = a.px.length !== b.px.length || !a.px.equals(b.px);
+  check('canvas renders the scene', a.colours >= 2 && b.colours >= 2 && differs, { before: a.colours, after: b.colours, differs });
+}
+{
+  const out = {};
+  for (const [k, attr] of [['ArrowRight', 'data-theta'], ['+', 'data-dist'], ['0', 'data-dist']]) {
+    const i = await tlLen();
+    await waits(() => page.keyboard.press(k));
+    out[k] = eased(await tlFrom(i), attr);
+  }
+  check('camera moves ease', Object.values(out).every(e => e.mid >= 3 && e.span >= 100), out);
+}
+{
+  const c0 = await cam();
+  await waits(() => page.keyboard.press('ArrowRight'));
+  const c1 = await cam();
+  check('ArrowRight orbits the azimuth', Math.abs(dang(c0.theta, c1.theta) - 15) <= 1, { from: c0.theta, to: c1.theta });
+  await waits(() => page.keyboard.press('ArrowLeft'));
+  const c2 = await cam();
+  check('ArrowLeft orbits the azimuth back', Math.abs(dang(c0.theta, c2.theta)) <= 1, { from: c0.theta, back: c2.theta });
+  await waits(() => page.keyboard.press('PageUp'));
+  const c3 = await cam();
+  check('PageUp tilts the elevation', Math.abs(c3.psi - c2.psi - 10) <= 1, { from: c2.psi, to: c3.psi });
+  await waits(() => page.keyboard.press('PageDown'));
+  const c4 = await cam();
+  check('PageDown tilts the elevation back', Math.abs(c4.psi - c2.psi) <= 1, { from: c2.psi, back: c4.psi });
+  const all = [c0, c1, c2, c3, c4];
+  check('orbit keys leave the layout and the selection',
+    !!c0.layout && !!c0.posHash && c0.sel === hub && all.every(c => c.layout === c0.layout && c.posHash === c0.posHash && c.sel === c0.sel),
+    all.map(c => ({ layout: c.layout, posHash: c.posHash, sel: c.sel })));
+}
+{
+  await go('#v=graph&s=' + encodeURIComponent(hub) + '&tab=content');
+  const focused = await page.evaluate(() => {
+    const b = document.getElementById('ibody');
+    if (b.tabIndex < 0 && !b.hasAttribute('tabindex')) b.tabIndex = -1;
+    b.focus();
+    return { inInsp: !!document.activeElement?.closest('#insp'), tall: b.scrollHeight > document.getElementById('v-graph').clientHeight };
+  });
+  const c0 = await cam();
+  for (const k of ['ArrowRight', 'ArrowLeft', 'PageUp', 'PageDown']) await key(k, 250);
+  await twoFrames(page);
+  const c1 = await cam();
+  check('orbit keys leave a focused inspector alone',
+    focused.inInsp && focused.tall && c1.move === c0.move && c1.theta === c0.theta && c1.psi === c0.psi,
+    { focused, before: c0, after: c1 });
+  await page.evaluate(() => document.activeElement?.blur());
+}
+{
+  await go('#v=graph&s=' + encodeURIComponent(hub));
+  await key('ArrowDown');
+  st = await state();
+  const m = st.hint.match(/^1\/(\d+) · /);
+  const n = m ? +m[1] : 0;
+  await key('ArrowUp');
+  const back = (await state()).hint;
+  check('ArrowDown still walks in the graph', !!m && !!st.chip && back.startsWith(`${n}/${n} · `), { first: st.hint, chip: st.chip, back });
+  await key('Escape');
+}
+{
+  await waits(() => page.keyboard.press('0'));
+  const r = {};
+  for (const [k, want] of [['+', 1 / 1.35], ['=', 1 / 1.35], ['-', 1.35]]) {
+    const c0 = await cam();
+    await waits(() => page.keyboard.press(k));
+    const c1 = await cam();
+    r[k] = { from: c0.dist, to: c1.dist, factor: +(c1.dist / c0.dist).toFixed(4), ok: Math.abs(c1.dist / c0.dist / want - 1) <= 0.02 };
+  }
+  check('+ moves the camera closer', r['+'].ok, r['+']);
+  check('= moves the camera closer', r['='].ok, r['=']);
+  check('- moves the camera away', r['-'].ok, r['-']);
+  await waits(() => page.keyboard.press('+'));
+  const c0 = await cam();
+  await waits(() => page.keyboard.press('0'));
+  const c1 = await cam();
+  check('0 fits the galaxy and keeps the selection',
+    c1.galaxy > 0 && Math.abs(c1.dist / c1.galaxy - 1) <= 0.02 && c1.dist !== c0.dist && c1.sel === hub && c0.sel === hub, { before: c0, after: c1 });
+}
+{
+  const box = await page.locator('#graph').boundingBox();
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  const c0 = await cam();
+  await page.mouse.move(cx - 100, cy + 7);
+  await page.mouse.down();
+  await page.mouse.move(cx + 100, cy + 7, { steps: 12 });
+  await page.mouse.up();
+  await twoFrames(page);
+  await page.waitForTimeout(100);
+  const c1 = await cam();
+  check('drag orbits the camera', Math.abs(dang(c0.theta, c1.theta)) >= 30 && c1.sel === c0.sel && c0.sel === hub, { before: c0, after: c1 });
+  await waits(() => page.keyboard.press('0'));
+  const w0 = await cam();
+  await page.mouse.move(cx, cy);
+  await page.mouse.wheel(0, 200);
+  await twoFrames(page);
+  await page.waitForTimeout(100);
+  const w1 = await cam();
+  await page.keyboard.down('Control');
+  await page.mouse.wheel(0, -100);
+  await page.keyboard.up('Control');
+  await twoFrames(page);
+  await page.waitForTimeout(100);
+  const w2 = await cam();
+  check('wheel zooms the camera', w1.dist > w0.dist && w2.dist < w1.dist, { start: w0.dist, wheel: w1.dist, pinch: w2.dist });
+}
+{
+  const lost = await page.evaluate(async () => {
+    const gl = document.getElementById('graph').getContext('webgl2');
+    const ext = gl && gl.getExtension('WEBGL_lose_context');
+    if (!ext) return 'no WEBGL_lose_context';
+    ext.loseContext();
+    await new Promise(r => setTimeout(r, 300));
+    const was = gl.isContextLost();
+    ext.restoreContext();
+    await new Promise(r => setTimeout(r, 500));
+    return was && !gl.isContextLost() ? 'ok' : 'context did not cycle';
+  });
+  await waits(() => page.keyboard.press('ArrowRight'));
+  const a = await shot();
+  await waits(() => page.keyboard.press('ArrowRight'));
+  const b = await shot();
+  const differs = a.px.length !== b.px.length || !a.px.equals(b.px);
+  check('the scene survives a lost GL context', lost === 'ok' && a.colours >= 2 && b.colours >= 2 && differs && errors.length === 0, { lost, before: a.colours, after: b.colours, differs, errors });
+}
+{
+  // reduced motion: a context that asks for it; every move writes its end value once
+  const rctx = await browser.newContext({ viewport: { width: 1600, height: 1000 }, reducedMotion: 'reduce' });
+  try {
+    await rctx.addInitScript(hooks);
+    const rp = await rctx.newPage();
+    rp.on('pageerror', e => errors.push(e.message));
+    await rp.goto(OKT + '#v=graph', { waitUntil: 'load' });
+    await rp.waitForFunction(() => document.getElementById('graph')?.getAttribute('data-dist'), null, { timeout: 30000 }).catch(() => {});
+    await rp.waitForTimeout(500);
+    const moves = {};
+    const acts = [
+      ['ArrowRight', () => rp.keyboard.press('ArrowRight')],
+      ['+', () => rp.keyboard.press('+')],
+      ['0', () => rp.keyboard.press('0')],
+      ['select', () => rp.evaluate(h => { location.hash = '#v=graph&s=' + encodeURIComponent(h); }, hub)],
+    ];
+    for (const [name, act] of acts) {
+      const i = await tlLen(rp);
+      await waits(act, rp);
+      const tl = await tlFrom(i, rp);
+      const end = await cam(rp);
+      const th = tl.filter(e => e[1] === 'data-theta'), di = tl.filter(e => e[1] === 'data-dist');
+      moves[name] = {
+        theta: th.length, dist: di.length,
+        once: th.length <= 1 && di.length <= 1 && th.length + di.length >= 1
+          && th.every(e => +e[2] === end.theta) && di.every(e => +e[2] === end.dist),
+      };
+    }
+    const anim1 = (await rp.evaluate(() => window.__tl)).filter(e => e[1] === 'data-anim' && e[2] === '1').length;
+    check('reduced motion cuts camera moves', Object.values(moves).every(m => m.once) && anim1 === 0, { moves, anim1 });
+  } finally {
+    await rctx.close();
+  }
+}
 
 // ---- LAYOUT ---------------------------------------------------------------------------------
 const gattr = name => page.evaluate(n => document.getElementById('graph').getAttribute(n), name);
