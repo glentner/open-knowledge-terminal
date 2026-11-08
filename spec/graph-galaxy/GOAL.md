@@ -108,11 +108,13 @@ Results list. Performance and camera checks run in the throwaway environment (`t
   galaxy scale, the graph SHALL enter system scale on the region nearest the pane's centre. Crossing
   scale by zoom SHALL NOT change the selection.
 - **R3** — WHEN a card is selected, the camera SHALL ease to focus scale on it, looking along the
-  focus set's smallest principal axis, at the distance that fits the focus set to about 70% of the
-  graph pane.
+  focus set's smallest principal axis, at the distance that fits the focus-set members in the
+  selection's region to about 70% of the graph pane; members in other regions SHALL be drawn as
+  portals at the rim (R5), inside the pane.
 - **R4** — WHEN `z` is pressed with the Results view active, the graph SHALL frame the results
   list's matches, wherever they are and across regions; WHEN `z` is pressed otherwise, it SHALL frame
-  the selection and its links. In both cases the camera SHALL re-solve its orientation and distance
+  the selection and its links as R3 does: the members in the selection's region fitted, members in
+  other regions as portals at the rim. In both cases the camera SHALL re-solve its orientation and distance
   for that set, and no card's layout position SHALL change. Selecting a match from Results SHALL make
   that card the focus, as any selection does (R3).
 - **R5** — WHEN `j` or `k` is pressed during a walk in the graph, the selection's walk mark SHALL
@@ -139,7 +141,9 @@ Results list. Performance and camera checks run in the throwaway environment (`t
   and then importance, drawn flat on an overlay rather than in perspective, with no two labels
   overlapping on screen.
 - **R10** — The layout SHALL be deterministic: the same KB SHALL give the same card positions on every
-  load, AND adding one card SHALL NOT move any card outside that card's folder.
+  load; adding a card to an existing folder SHALL NOT move any card outside that folder; AND adding a
+  card that creates a new folder SHALL NOT move any card outside it, provided the new folder is
+  younger by first commit than its siblings, or uncommitted.
 - **R11** — The graph SHALL hold a p95 frame time ≤ 16.7 ms during a scripted orbit and a scripted
   warp, measured with `tests/perf/profile.mjs` (or an extension of it) on the `tests/env.sh` clone of
   the KB, in headed Chromium on mac-m4. WHERE `prefers-reduced-motion` is set, every camera move SHALL
@@ -222,6 +226,21 @@ Results list. Performance and camera checks run in the throwaway environment (`t
   README § Keys' "in the order the inspector lists them" is updated. The cap of 24 card labels is
   hard. Focus-set cards are always drawn, in any region. (2026-11-08, foreman ruling under decision
   2026-11-08-okt-dream-inbox-autonomous.)
+- **Q:** What does the R3 fit cover when the focus set reaches other regions? — **A:** The members
+  in the selection's region are fitted to about 70% of the pane; members in other regions are drawn
+  as portals at the rim (R5), inside the pane. `z` from the Results view still fits all matches in
+  place, wherever they are. This is the story's "zoom into a solarsystem ... with connections to
+  other systems". R3 and R4's selection branch are amended to say so. (2026-11-08, foreman ruling
+  under decision 2026-11-08-okt-dream-inbox-autonomous, at the PLAN/TECH sign-off.)
+- **Q:** R10's locality is unconditional, but any well-spread layout needs an order a new folder
+  can't jump. What does R10 promise? — **A:** Sibling folders are ordered by first commit (the
+  earliest first-commit time of any file under them); a folder with no committed file sorts after
+  every committed sibling, ties broken by path. R10 is amended accordingly. Known exceptions: a
+  folder authored earlier on another host that lands later (its older first commit sorts it before
+  existing siblings), an old card renamed into a new folder (it carries its old first commit), and,
+  among several uncommitted sibling folders, a new one whose path sorts before an existing one.
+  (2026-11-08, foreman ruling under decision 2026-11-08-okt-dream-inbox-autonomous, at the PLAN/TECH
+  sign-off.)
 
 ## Related materials
 
