@@ -1,0 +1,44 @@
+# Native tests each phase must add, by exact name: <phase>|<test path>. gate.sh step 2 runs them in
+# one `cargo test -p okt-client -- --exact …` and needs every one to exist, run (not ignored) and
+# pass. What each must assert is in TECH.md's phase body; code-review grades the bodies.
+P1|graph::space::tests::deterministic
+P1|graph::space::tests::order_independent
+P1|graph::space::tests::r10_existing_folder
+P1|graph::space::tests::r10_new_subfolder
+P1|graph::space::tests::r10_new_chain
+P1|graph::space::tests::r10_new_region_first
+P1|graph::space::tests::r10_new_region_last
+P1|graph::space::tests::r10_root
+P1|graph::space::tests::r10_new_surface
+P1|graph::space::tests::uncommitted_after_committed
+P1|graph::space::tests::r10_property
+P1|graph::space::tests::spread
+P2|graph::cam::tests::basis_orthonormal
+P2|graph::cam::tests::project_matches_matrices
+P2|graph::cam::tests::jacobi_residual_and_determinism
+P2|graph::cam::tests::wrap_pi_short_arc
+P2|graph::cam::tests::wheel_delta_modes
+P2|graph::cam::tests::ease_endpoints_and_monotone
+P3|graph::vis::tests::region_of_nodes
+P3|graph::vis::tests::pair_counts
+P3|graph::vis::tests::bundle_weight
+P3|graph::cam::tests::classify_hysteresis
+P3|graph::cam::tests::nearest_region_front_first
+P4|graph::vis::tests::hidden_two_hop_other_region
+P4|graph::vis::tests::focus_set_any_region
+P4|graph::vis::tests::folders_terminal
+P4|graph::vis::tests::no_tier3_multi_region
+P4|graph::vis::tests::edge_rule
+P4|graph::vis::tests::show_all_hides_nothing
+P4|graph::cam::tests::solve_view_exact_axis
+P4|graph::cam::tests::solve_view_degenerate
+P4|graph::cam::tests::angles_round_trip
+P4|graph::cam::tests::fit_fills_seventy_percent
+P5|graph::labels::tests::cap_24
+P5|graph::labels::tests::no_overlap
+P5|graph::labels::tests::fill_order
+P5|graph::labels::tests::walk_target_before_regions
+P6|graph::vis::tests::angular_clockwise
+P6|graph::vis::tests::angular_ties
+P6|graph::vis::tests::angular_portal_rim
+P7|graph::cam::tests::warp_endpoints_and_rise

@@ -1,0 +1,537 @@
+---
+slug: graph-galaxy
+title: The graph as a navigable 3D space (galaxy, system, focus)
+kind: feature
+appetite: big
+status: in_progress
+branch: feat/graph-galaxy
+base: main
+current_phase: P1
+last_updated: '2026-11-08'
+phases:
+- id: P1
+  name: Deterministic 3D layout
+  status: pending
+  satisfies:
+  - R10
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: sh spec/graph-galaxy/verify/gate.sh P1
+- id: P2
+  name: WebGL2 scene and the orbit camera
+  status: pending
+  satisfies:
+  - R7
+  - R11
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: sh spec/graph-galaxy/verify/gate.sh P2
+- id: P3
+  name: Galaxy and system scales, show all
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: sh spec/graph-galaxy/verify/gate.sh P3
+- id: P4
+  name: Focus scale and visibility tiers
+  status: pending
+  satisfies:
+  - R3
+  - R8
+  depends_on:
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: sh spec/graph-galaxy/verify/gate.sh P4
+- id: P5
+  name: Flat label overlay and compass
+  status: pending
+  satisfies:
+  - R9
+  depends_on:
+  - P4
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: sh spec/graph-galaxy/verify/gate.sh P5
+- id: P6
+  name: z framing and the angular walk with portals
+  status: pending
+  satisfies:
+  - R4
+  - R5
+  - R7
+  depends_on:
+  - P5
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: sh spec/graph-galaxy/verify/gate.sh P6
+- id: P7
+  name: Warp flight, history, frame-time gate and ledger
+  status: pending
+  satisfies:
+  - R6
+  - R11
+  - R12
+  depends_on:
+  - P6
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: sh spec/graph-galaxy/verify/gate.sh P7
+review:
+  last_reviewed_commit: ''
+  verdict: none
+  blocked_reason: ''
+  cycle: 0
+---
+
+# TECH.md — The graph as a navigable 3D space (galaxy, system, focus)
+
+The **context engine and finite-state machine** for building this feature. The YAML
+frontmatter above is the resume ground-truth (read it from the cycle worktree with
+`uv run --with pyyaml python "$KB/bin/factory/next_phase.py" spec/graph-galaxy/TECH.md`); the
+per-phase checklists below are the work. `code-build` executes the next actionable phase, runs its
+`verify:` command, updates state via
+`uv run --with pyyaml python "$KB/bin/factory/set_phase.py" …`, and makes one atomic code+state commit.
+
+- **Vision / requirements (locked):** [`GOAL.md`](GOAL.md) — R-IDs are the contract.
+- **Authoritative design:** [`PLAN.md`](PLAN.md).
+- **Backing research:** [`research/00-digest.md`](research/00-digest.md) + briefs.
+
+## Frontmatter field reference
+
+- `status` (top): `planned | in_progress | blocked | in_review | done` (`done` is stamped by
+  `code-publish` after confirmation, just before landing — the terminal state of the retained record)
+- `appetite`: `small | big` — caps phase count and build-iteration budget (circuit breaker).
+- `branch`, `base`: the cycle's branch (prefix per GOAL `kind`, from the profile's `branches`) and the
+  profile's `base`.
+- phase `status`: `pending | in_progress | done | blocked`
+- `satisfies`: GOAL R-IDs this phase delivers (traceability anchor for `code-review`).
+  **Artifact-deliverable R-IDs.** Some requirements are met by a *committed document* — a research
+  audit, a protocol doc, an assessment — not by CLI-observable behaviour. Attach such an R-ID to the
+  phase that produces and commits the artifact, and give that phase a content `verify:`
+  (`test -f …`, a `grep -q` for the sections that must exist) rather than forcing a CLI drive.
+  **Say so in the phase body**, because it changes who can grade it: `code-review` blinds its reviewer
+  to all of `spec/`, so an R-ID whose evidence lives there is graded by the *orchestrator*, not the
+  blind reviewer. Naming it in `TECH.md` is what lets the review skill route it correctly instead of
+  reporting an unverifiable requirement.
+- `depends_on`: phase ids that must be `done` first (a phase is actionable only when met).
+- `parallel`: `true` only for genuinely independent, non-coupled work (docs, tests, isolated leaf
+  modules). Any phase touching the profile's `coupled core` is always `false`.
+- `hammerable`: `false` marks a correctness/security phase that scope-hammering must **never** cut.
+- `hill`: `uphill` (still figuring it out) → `crest` (unknowns resolved) → `downhill` (just
+  executing). A phase stuck `uphill` across builds is a raised hand → escalate to the human.
+- `attempts`: durable failed-verify counter (absent = 0), bumped by `set_phase.py --phase P<n>
+  --record-attempt` on every red verify gate; `next_phase.py` warns at ≥3 — the circuit breaker
+  runs on this file, not on session memory.
+- `verify`: the exact command that proves the phase (prefer driving the real CLI, not just tests —
+  wrap CLI drives in the profile's `throwaway environment` helper, `<helper> sh -c "…"`, so they hit
+  a disposable instance, never the developer's real data). A gate carrying `$( )` or quoting the
+  calling shell would mangle is set with `set_phase.py --verify-file PATH`, not `--verify`.
+- `review.cycle`: completed review passes, auto-incremented by every `set_phase.py --verdict …`;
+  REVIEW.md's "Cycle {n}" mirrors it and the ≤3-cycle bound is graded against it. `--verdict approved`
+  also clears `review.blocked_reason` unless one is passed explicitly.
+
+## Conventions (apply to every phase)
+
+- Commit conventions, code style, and load-bearing invariants come from the repo's `AGENTS.md` — it
+  is the constitution. Walk the sections of its § Invariants that this change touches; that is the
+  curated footgun checklist.
+- One phase per `code-build` invocation by default; one atomic commit containing **both** the code and
+  the `TECH.md` state change. The branch commit subject is code-build's (`$KB/skill/code-build.md` →
+  Step 6), not restated here; branch commits are squashed away at `code-publish` per the profile's
+  `landing`. Trailers follow the profile's `branch commits`.
+- The last phase carries the standing last-phase items: the deferral ledger (`code-plan` Step 6.8),
+  and every item the previous cycle's last phase carried for a project-level obligation (mpsearch's
+  `## Times` quote, taken as `code-build` Step 4 says). A plan that drops one says why in `PLAN.md`.
+  This repo's previous cycle carried no project-level last-phase item, so only the ledger applies.
+- A PR body (when the profile's `landing` opens one) ends with an attribution naming the actual
+  harness, model, and variant.
+- A CLI/feature change obeys the profile's `same-commit rules` (§ Conventions in `AGENTS.md`): the
+  help text, docs, or generated files it names change **in the same commit**.
+
+### This cycle's gate (every phase)
+
+- Every `verify:` is `sh spec/graph-galaxy/verify/gate.sh P<n>`, run from the worktree root **after
+  staging** (`git add -A`): the static checks read the index and fail on untracked or unstaged source.
+  The gate's header states its steps, footprint and exit codes (0 green, 1 red, 75 environment: port
+  6581 busy for 5 min or a display slower than 120 Hz). Build's fail-once mutation uses
+  `--phase-only`; the pre-push check uses `--static`.
+- It runs with the Bash sandbox **off** (env.sh binds 6581, never 6580) and needs, exported by the
+  caller: `WASM_BINDGEN` (the Cargo.lock pin, 0.2.129), `PLAYWRIGHT_BROWSERS_PATH`, and either
+  `npm install` in `tests/` (the profile's `setup`) or `PLAYWRIGHT_MODULE` pointing at a Playwright
+  `index.mjs`. Steps 3–4 open Chromium on the host's display; step 4 is headed, from P2 on.
+- **Named checks:** `verify/checks.txt` rows are `phase|label|predicate`. Write each check in
+  `tests/ui/keys.mjs` with exactly that label as its printed prefix, implementing exactly that
+  predicate; its header defines "waits", "timeline", "positions" and "projects". The predicates are
+  the contract code-review grades; the gate only sees the labels.
+- **Required tests:** `verify/required.txt` names every native test a phase adds. They run by exact
+  name and must exist, not be ignored, and pass. Each phase body says what each one asserts.
+- **Hooks:** PLAN § 2.8. They are written inside `gl.rs` and `overlay.rs` from what was drawn, never
+  from `anim.to`, the tier map or a parallel computation. `cam_to` bumps `data-move` synchronously.
+- **Frame time:** PLAN § 6 step 4 fixes `profile.mjs --graph`'s output lines; the gate re-derives
+  the verdict from them.
+- **Measured** on the prototype dry run (2026-11-08, mac-m4): step 2 took 34 s with warm
+  dependencies; step 3 took 91 s, including a cold client build and the 33 existing checks. A warm
+  phase gate is about 2–4 min.
+- `AGENTS.md` § 1 applies everywhere: no borrow of `S`, settings or `GS`/`WALK` across a call that can
+  re-enter (focus, blur, dispatch, `nav::select`, `insp::render`, `mark_chip`) or an `await`. `g()`
+  is always `borrow_mut`, so a nested call panics. keys.mjs fails on a page error or a console message
+  holding "panicked at" or "already borrowed" (add the console listener in P1).
+
+---
+
+## Phase P1 — Deterministic 3D layout
+**Satisfies:** R10 · **Depends on:** —
+**Goal:** the layout of PLAN § 2.2 exists as a pure, natively tested module, computed on every build.
+Its hash and positions are visible in the running app, stable across a shuffled reload, and adding
+cards to the throwaway KB moves nothing outside their folders. Nothing is drawn from it yet; the 2D
+graph keeps painting.
+
+- [ ] `okt-client/src/model.rs`: `Node` gains `#[serde(default)] pub ft: Option<f64>`.
+- [ ] `okt-client/src/graph/space.rs`, with `graph.rs` declaring `mod space;`. It uses `std` only and
+      no hashed collections. It holds `LNode`, `Space`, `pub fn layout(nodes: &[LNode]) -> Space`,
+      and the pinning line `const _: fn(&[LNode]) -> Space = layout;`.
+  - Contents: the hash, birth order, region and cap lattices, depth radii, card seeding,
+    folder-local relaxation, root cards at the centre, and surfaces as the pseudo-region `@` with
+    unrelaxed hash positions.
+  - Sibling order is `(birth, path)`. A folder with no committed file has birth +∞, so it sorts
+    after every committed sibling, with ties by path (GOAL Clarification on R10).
+  - A comment says why `layout` takes no edges or counts, and names R10's known exceptions from the
+    Clarification.
+- [ ] Tests in `space.rs` (names in `verify/required.txt`). Each R10 test asserts bitwise equality
+      for **every** pre-existing node outside the new card's folders: cards, folder nodes and
+      surfaces. The fixture gives every committed folder an `ft`.
+  - `deterministic`: run twice, compare bitwise.
+  - `order_independent`: seeded shuffles of nodes.
+  - `r10_existing_folder`.
+  - `r10_new_subfolder`.
+  - `r10_new_chain`: two new folders deep.
+  - `r10_new_region_first` and `r10_new_region_last`: names sorting before and after every region.
+  - `r10_root`.
+  - `r10_new_surface`: a new surface node moves nothing else.
+  - `uncommitted_after_committed`: a folder without `ft` takes its slot after every committed
+    sibling, whatever its name, and two uncommitted siblings order by path.
+  - `r10_property`: 200 random single additions, mixing existing folders, new subfolders, new
+    regions and root.
+  - `spread`: region min angle ≥ 25° on a 21-region fixture, within-folder min distance ≥ 0.95 × 10,
+    no NaN.
+- [ ] `graph.rs` `build()`:
+  - Build `LNode`s from the `Idx`, call `space::layout`, and keep the `Space` in `G` (an `Rc`).
+  - Set `#graph[data-layout]` (FNV-1a over positions quantised to 1e-6) and `#graph[data-total]`.
+  - Fill `window.__oktPos` when a test installed it.
+  - The 2D paint is unchanged.
+- [ ] `tests/ui/keys.mjs`: the P1 rows of `verify/checks.txt`, plus a console listener that fails the
+      run on "panicked at" or "already borrowed". The probe writes go to `$OKT_KB`, the env.sh clone,
+      never `~/KB`.
+- **Verify:** `sh spec/graph-galaxy/verify/gate.sh P1`.
+- **Touches:** `okt-client/src/model.rs`, `okt-client/src/graph.rs`, `okt-client/src/graph/space.rs`,
+  `tests/ui/keys.mjs`. No `app.css` change: P1 changes no paint.
+
+## Phase P2 — WebGL2 scene and the orbit camera
+**Satisfies:** R7, R11 (orbit) · **Depends on:** P1
+**Goal:** the radial 2D canvas is gone. Every card and edge of the layout is drawn in WebGL2 with
+depth cues, under a spherical camera.
+- It orbits by drag and keys, and zooms by wheel, pinch and `+`/`=`/`−`/`0`.
+- It has hooks, picking, reduced-motion cuts and context-loss recovery.
+- The headed `orbit` and `orbit_all` scenarios hold p95 ≤ 16.7 ms.
+
+- [ ] `okt-client/Cargo.toml`: add the web-sys features `WebGl2RenderingContext`, `WebGlProgram`,
+      `WebGlShader`, `WebGlBuffer`, `WebGlUniformLocation`, `WebGlVertexArrayObject`,
+      `WebGlContextAttributes`, `WebGlContextEvent`, `WebglLoseContext`.
+- [ ] `graph/cam.rs` (pure): the pose, basis, `project`, `view_proj`, Jacobi, easing, wheel
+      normalisation, and `cam_to`'s pose math. This phase's tests:
+  - `basis_orthonormal`: orthonormal, right-handed, up.y > 0 over a θ/ψ grid.
+  - `project_matches_matrices`: `project` equals `P·V` within 1e-9, and the target maps to the pane
+    centre.
+  - `jacobi_residual_and_determinism`: residual ≤ 1e-12·λmax, orthonormal, bitwise repeatable, on
+    random, diagonal, repeated-root and zero matrices.
+  - `wrap_pi_short_arc`.
+  - `wheel_delta_modes`: line, page, ctrl factors and the clamp.
+  - `ease_endpoints_and_monotone`: smootherstep endpoints exact and monotone; `ln d` linear.
+- [ ] `graph/gl.rs`:
+  - programs, VAO, instanced quads for points (sorted back to front per frame), line quads for edges,
+    premultiplied blending, uniforms per frame;
+  - instance re-upload only on a tier change;
+  - `webglcontextlost` and `webglcontextrestored`;
+  - writes the drawn-state hooks.
+- [ ] `graph/overlay.rs`: a pointer-transparent second canvas over `#graph`, sized to the pane at DPR.
+      This phase draws only the hover state.
+- [ ] `graph.rs`:
+  - **Retire:** the radial layout (`fn layout(idx: &Idx)`, `polar`, `R_TOP`, `dr_dir`,
+    `label_geom`), the 2D scene context, the ring guides and the spotlight layers.
+  - **Camera:** `G` gains `pose`, `CamAnim` and `autofit`. Every move goes through one
+    `cam_to(to, kind)`, which bumps `data-move` and reads `reduced_motion()` at the start (new, the
+    `chrome.rs:60` `match_media` pattern). `frame_tick` evaluates the pose under one short borrow
+    and drops it before writing hooks.
+  - **Input:**
+    - pointer drag orbits, keeping the 4 px dead zone;
+    - wheel and pinch zoom about the target (row D3);
+    - `0`, the fit button and a double-click on empty space fit the galaxy and keep the selection;
+    - a double-click on a folder toggles collapse;
+    - CPU picking over the last frame's projected points: hover shows `#gtip`, a click selects.
+  - **API:** `fit`, `zoom_by`, `focus_node` and `frame_selection` keep their names. For now
+    `frame_selection` fits the selection and its walk members; P4 and P6 make it the real solve.
+  - **Hooks:** those of PLAN § 2.8 that exist so far. `data-scale` reads `focus` or `galaxy` until P3.
+    `window.__oktDraw` is kept.
+  - **Colours:** `Colors::read` is canonicalised through the overlay `fillStyle`. An accent change
+    rebuilds the colours.
+- [ ] `keys.rs` graph block (before the global match, after the walk arms):
+  - ArrowLeft/ArrowRight turn the azimuth ±15° and PageUp/PageDown tilt ±10°, each eased over 140 ms,
+    only while the graph view is active and `document.activeElement` is neither inside `#insp` nor an
+    input. Otherwise the key falls through, so a focused inspector scrolls natively (row D1).
+  - ArrowUp/ArrowDown keep walking.
+  - `+`/`=` and `-` act on `ln d`; `0` is the galaxy fit.
+- [ ] `app.css` graph block:
+  - retire `.spotlit`, `.ebase`, `.ehot`, `.ring-guide` and `.n .lab`;
+  - add the overlay canvas rule and the colour tokens the GL reads;
+  - keep `.gtools`, `.glegend` and `.gtip`.
+- [ ] Docs:
+  - `README.md` § Keys, and the `chrome.rs` `?` list and GRAPH `<dl>`: ←/→ orbit, PageUp/PageDown
+    tilt, `+`/`=`/`−`/`0` on camera distance, drag orbits, wheel and pinch zoom.
+  - `README.md:9-11` loses "radial" and "panning".
+  - `AGENTS.md` Map and profile: the coupled core names `okt-client/src/graph/` (row D9).
+- [ ] `tests/ui/keys.mjs`: the P2 rows of `verify/checks.txt`.
+- [ ] `tests/perf/profile.mjs`: add a `--graph` mode, parsed before `points.json` is read; the legacy
+      mode is untouched.
+  - **Target:** `process.env.OKT` only, never argv. It exits 2 when `OKT` is unset or names 6580.
+  - **Browser:** headed by default (`--headless` prints numbers with no verdict), with
+    `--disable-backgrounding-occluded-windows`, 1600×1000 at DPR 2.
+  - **Run:** prints the lines PLAN § 6 step 4 fixes. It calibrates the refresh for 1 s, warms up
+    with one untimed orbit, then runs:
+    - `orbit`: ≥ 5 s and ≥ 600 frames of ArrowRight presses every 16 ms, then PageUp, then a
+      circular drag;
+    - `orbit_all`: the same with show all on. Until P3 adds the toggle, every card is drawn
+      already.
+  - **Recording:** rAF intervals and `__oktDraw` counts, in the page.
+  - **Exit:** 1 on any FAIL or any page error. The browser closes in `finally`.
+- [ ] Seed `issues/graph-zoom-to-cursor.md` (`unshaped`, from the ISSUE template) and its
+      `ROADMAP.md` entry: zoom about the pointer, the alternative row D3 deferred.
+- **Verify:** `sh spec/graph-galaxy/verify/gate.sh P2`.
+- **Touches:** `okt-client/Cargo.toml`, `okt-client/src/graph.rs`,
+  `okt-client/src/graph/{cam,gl,overlay}.rs`, `okt-client/src/keys.rs`, `okt-client/src/chrome.rs`,
+  `okt-client/src/actions.rs` (accent rebuild), `okt-client/static/{app.css,index.html}`,
+  `README.md`, `AGENTS.md`, `tests/ui/keys.mjs`, `tests/perf/profile.mjs`,
+  `issues/graph-zoom-to-cursor.md`, `ROADMAP.md`.
+
+## Phase P3 — Galaxy and system scales, show all
+**Satisfies:** R1, R2 · **Depends on:** P2
+**Goal:**
+- With nothing selected, the graph is a galaxy of region glyphs joined by weighted bundles, with
+  region names only.
+- Selecting a folder brings its region to system scale, with the other regions on the rim.
+- Zoom crosses scales without touching the selection.
+- "Show all" replaces "all labels" and draws every card and edge.
+
+- [ ] `graph/vis.rs` (pure): `ix`, `adj`, `region` per node (root `.` and surfaces `@` as
+      pseudo-regions, row D11), region-pair link counts summing `n`, bundle weights. Tests:
+  - `region_of_nodes`: root, surface and nested cards.
+  - `pair_counts`: sums of `n` keyed `(min, max)`, with root and surfaces excluded.
+  - `bundle_weight`: rises with the count.
+- [ ] `graph/cam.rs`: `classify` and `nearest_to_centre`. Tests:
+  - `classify_hysteresis`: no flip-flop at ±10% around a band; respects the innermost cap.
+  - `nearest_region_front_first`: a region behind the camera loses to any in front; ties go to
+    count, then name.
+- [ ] `graph.rs`:
+  - **Scale:** the scale state of PLAN § 2.3 (from the move kind after a solve, from `classify` on
+    zoom input) and the active region. Zoom-in at galaxy picks the in-front region nearest the
+    centre; zoom-out past the band eases the target to the origin, and wheel input adjusts that ease
+    rather than cancelling it. Crossings never call `nav::select`.
+  - **Galaxy:** region glyphs only (halo by count) and Bézier bundles tessellated once per build.
+    The root core and `@` glyphs are unlabelled.
+  - **System:** the region fitted, subfolder glyphs at their anchors, other regions as rim glyphs
+    (solid in front, hollow behind) with their bundles. Glyph positions interpolate across the band.
+    A folder selection fits its region.
+  - **Tiers at every scale** (PLAN § 2.4). Until P4 the tier rule is: the selected folder's region
+    is drawn, every other card is hidden.
+  - **Hooks:** `data-scale`, `data-region`, `data-regions`, `data-rim`, `data-bundles`, `data-edges`,
+    `data-dist-galaxy`.
+- [ ] `graph/overlay.rs`: region names at glyphs and rim glyphs; no card labels at galaxy scale.
+- [ ] Show all (rows D2, D4):
+  - `state.rs`: `Settings.labels` becomes `Settings.show_all`, under the key `showAll`, in load and
+    save. An old `labels` key falls into `extra`.
+  - `graph::toggle_labels` becomes `toggle_show_all`. The `.gtools` button becomes `data-z="all"`,
+    and the `chrome.rs` DISPLAY row says SHOW ALL.
+  - Show all draws every card and every link edge at true positions, overriding collapse (row D12).
+- [ ] `app.css`: glyph, bundle and rim tokens; the region-name overlay rule.
+- [ ] `tests/ui/keys.mjs`: the P3 rows.
+- **Verify:** `sh spec/graph-galaxy/verify/gate.sh P3`.
+- **Touches:** `okt-client/src/graph.rs`, `okt-client/src/graph/{vis,cam,overlay,gl}.rs`,
+  `okt-client/src/state.rs`, `okt-client/src/chrome.rs`, `okt-client/static/{app.css,index.html}`,
+  `tests/ui/keys.mjs`.
+
+## Phase P4 — Focus scale and visibility tiers
+**Satisfies:** R3, R8 · **Depends on:** P3
+**Goal:**
+- Selecting a card eases the camera to focus scale, along the focus set's exact smallest principal
+  axis, fitted to 70% of the pane.
+- Only the tiers are drawn: the focus haloed, depth cues on, portals reaching the rim.
+- The compass shows where the camera is.
+
+- [ ] `graph/vis.rs`: BFS tiers (folders terminal; the rule of PLAN § 2.5, including no tier 3 for a
+      multi-region focus, row D6), the edge selection, importance, and collapse folding tier 3 only
+      (row D12). Tests:
+  - `hidden_two_hop_other_region`.
+  - `focus_set_any_region`.
+  - `folders_terminal`.
+  - `no_tier3_multi_region`.
+  - `edge_rule`: no tier-2/2 or tier-3 edges, and portals to the rim.
+  - `show_all_hides_nothing`.
+- [ ] `graph/cam.rs`: `solve_view` and `fit_distance`. Tests:
+  - `solve_view_exact_axis`: an anisotropic set returns e₀ within 1e-9, sign toward the view.
+  - `solve_view_degenerate`: isotropic keeps the view; two points; collinear; coplanar normal;
+    coincident; and λ = (1, 1.5, 7.5) is **not** degenerate.
+  - `angles_round_trip`: includes the pole clamp.
+  - `fit_fills_seventy_percent`: max |ndc| = 0.70 ± 1e-9 at aspects 0.5, 1 and 2.5; a near point
+    raises d; a single point gives `d_min`.
+- [ ] `graph.rs`:
+  - **Card selection:** `nav::select` triggers the R3 solve via `cam_to(Ease)`. The fit input is the
+    focus-set members in the selection's region; members in other regions are drawn as rim portals
+    (amended R3). It eases while the graph is visible and cuts while it is hidden; the
+    `from != "graph"` guard at `nav.rs:56` goes.
+  - **Folder selection** keeps P3's region fit.
+  - **Portals:** an off-pane focus-set card's edge is drawn to its region's rim glyph.
+  - **Look:** a static focus halo (additive on dark backgrounds only); depth cues (saturation,
+    alpha, an aerial fade toward `--graph-bg`); size by degree.
+  - **Hooks:** `data-focus`, `data-focus-n`, `data-focus-ids`, `data-tiers`, `data-drawn-regions`.
+- [ ] `graph/overlay.rs`: the compass, bottom-right (axes, horizon ring, focused-region dot, scale
+      word).
+- [ ] `app.css`: `--graph-halo`, `--graph-fog`, `--graph-t2-alpha`, `--graph-t3-alpha`, compass rules.
+- [ ] `tests/ui/keys.mjs`: the P4 rows.
+- **Verify:** `sh spec/graph-galaxy/verify/gate.sh P4`.
+- **Touches:** `okt-client/src/graph.rs`, `okt-client/src/graph/{vis,gl,overlay,cam}.rs`,
+  `okt-client/src/nav.rs`, `okt-client/static/app.css`, `tests/ui/keys.mjs`.
+
+## Phase P5 — Flat label overlay and compass
+**Satisfies:** R9 · **Depends on:** P4
+**Goal:** at most 24 card labels, filled by tier then importance, flat on the overlay. They never
+overlap each other, region names or the pane chrome, at rest or in motion. The walk target's label
+is placed first.
+
+- [ ] `graph/labels.rs` (pure): `const MAX_CARD_LABELS: usize = 24;` and
+      `place(cands, obstacles, pane, last_anchor) -> Vec<Placed>`. Tests:
+  - `cap_24`: at most 24 non-region labels over random scenes of up to 2000 candidates.
+  - `no_overlap`: all placed rects pairwise disjoint, region names included.
+  - `fill_order`: tier, walk target, importance, path; a colliding region name is dropped.
+  - `walk_target_before_regions`: the walk target's label survives a colliding region name.
+- [ ] `graph/overlay.rs`:
+  - draws exactly the `Placed` list, measured with the metrics and DPR it draws with, each label's
+    text clipped to its rect;
+  - writes `data-labels` (`[x,y,w,h,kind,text]`) and `data-label-cands` from that list;
+  - keeps a `measureText` cache;
+  - freezes the label set during motion and re-solves 150 ms after rest;
+  - card text drops `.md`; portal text is middle-ellipsised to 34 characters (row D7: portals count).
+- [ ] `app.css`: overlay label rules (size, weight, knockout in `--graph-bg`).
+- [ ] `tests/ui/keys.mjs`: the P5 rows.
+- **Verify:** `sh spec/graph-galaxy/verify/gate.sh P5`.
+- **Touches:** `okt-client/src/graph/{labels,overlay}.rs`, `okt-client/src/graph.rs`,
+  `okt-client/static/app.css`, `tests/ui/keys.mjs`.
+
+## Phase P6 — z framing and the angular walk with portals
+**Satisfies:** R4, R5, R7 (docs of the walk order) · **Depends on:** P5
+**Goal:** `z` re-solves the camera for the selection and its links, or for the Results matches,
+without moving a card. `j`/`k` step clockwise on screen, with the inspector's row marked. Portals
+carry the target's path.
+
+- [ ] `keys.rs` `z`:
+  - Capture `s().view == "list"` and clone `S.list` before switching to the graph, then drop the
+    borrow.
+  - With Results active, the focus set is the FIND files and names, or the Paths items, and the
+    camera solves for all of them in place. Otherwise it runs the R3 solve (the in-region members
+    fitted, the others as rim portals, per amended R4).
+  - Both call `graph::frame_set(ids)` via `cam_to`, with the scale kept at focus (PLAN § 2.3). No
+    history push (row D10).
+- [ ] `graph/vis.rs`: `angular_order(focus_px, targets)`, clockwise from 12 o'clock; ties go to
+      distance, then path; portal and behind-camera targets sit at their rim point. Tests:
+  - `angular_clockwise`.
+  - `angular_ties`.
+  - `angular_portal_rim`.
+- [ ] `graph.rs` walk:
+  - Membership comes from `insp::walk_list`. The order is computed from the destination pose and
+    frozen per walk; a user orbit or zoom re-sorts it and re-finds the target by id.
+  - The camera holds still during j/k, except a small re-fit for an off-pane target in the region.
+  - Hooks: `data-walk`, `data-walk-i`, `data-walk-n`, `data-walk-angle`.
+  - The `#ghint` format is kept. The walk target's portal label carries its path.
+- [ ] `insp.rs`: `render()` re-applies `mark_chip(graph::walk_target())`, with no `GS`/`WALK` borrow
+      held across it. Update the doc comment.
+- [ ] Docs:
+  - `README.md` § Keys and the `?` list: j/k step clockwise in screen order, replacing "in the order
+    the inspector lists them"; `z` frames the selection and its links, or the Results matches.
+  - Doc comments at `keys.rs:400`, the `graph.rs` walk and `insp.rs:484`.
+- [ ] Seed `issues/walk-mark-chip-cap.md` (`unshaped`) and its `ROADMAP.md` entry. The inspector caps
+      chips at 40 per group, so a walk target past the cap gets no mark. This is pre-existing and not
+      fixed in this cycle.
+- [ ] `tests/ui/keys.mjs`: the P6 rows.
+- **Verify:** `sh spec/graph-galaxy/verify/gate.sh P6`.
+- **Touches:** `okt-client/src/keys.rs`, `okt-client/src/graph.rs`, `okt-client/src/graph/vis.rs`,
+  `okt-client/src/insp.rs`, `okt-client/src/chrome.rs`, `README.md`, `okt-client/static/app.css`,
+  `tests/ui/keys.mjs`, `issues/walk-mark-chip-cap.md`, `ROADMAP.md`.
+
+## Phase P7 — Warp flight, history, frame-time gate and ledger
+**Satisfies:** R6, R11, R12 · **Depends on:** P6
+**Goal:**
+- Enter or space during a walk flies to the target on the rising 600 ms path and pushes a history
+  entry.
+- `[` eases back to the stored pose and `]` goes forward.
+- Reduced motion cuts every move.
+- Interleaved moves never panic a borrow.
+- The headed orbit and warp hold p95 ≤ 16.7 ms.
+- The cycle's records are consistent.
+
+- [ ] `keys.rs` walk branch: Enter/space call `nav::select(Some(t), SelOpts { warp: true, .. })`.
+      With no walk they keep today's meaning (folder toggle, content tab).
+- [ ] `nav.rs`:
+  - add `SelOpts.warp`;
+  - before `nav(true)` pushes, `replace_state` the current entry with `{pose}`, the destination pose
+    of any move in flight;
+  - `apply_hash` reads the hash and `history.state.pose` together, after its last await, then calls
+    `graph::cam_to(pose, Ease)` (fallback: the R3 solve) and `graph::walk_reset()` when the
+    selection changed;
+  - the hash format and its dedupe are unchanged.
+- [ ] `graph.rs`: `focus_node_with(id, Move::Warp)` calls `cam_to(Warp)`: van Wijk–Nuij, 600 ms, with
+      the minimum rise of PLAN § 2.7 and a cap at the galaxy fit. The hook `data-peak` records the
+      flight's peak.
+- [ ] `graph/cam.rs`: test `warp_endpoints_and_rise`: endpoints exact; peak ≥ max(2·max(d₀, d₁),
+      d_system) and ≤ d_G; D = 0 falls back to a log-lerp with the same floor.
+- [ ] Docs: `README.md` § Keys and the `?` list say Enter or space flies there, `[` flies back and
+      `]` goes forward.
+- [ ] `tests/perf/profile.mjs --graph`: add `warp`, six round trips of `j`, space (alternating with
+      Enter), wait, `[`, wait. Frames are recorded only while `data-anim="1"`, and the scenario needs
+      at least 900 of them.
+- [ ] `tests/ui/keys.mjs`: the P7 rows.
+- [ ] Seed `issues/perf-profile-points.md` (`unshaped`) and its `ROADMAP.md` entry. The legacy
+      `profile.mjs` mode throws on the empty `points.json` and defaults to 6580. This is pre-existing
+      and not fixed in this cycle.
+- [ ] The deferral ledger: walk every earlier phase body here and `PLAN.md`. Each deferred item names
+      an `issues/` seed with a `ROADMAP.md` entry (`verify/ledger.sh`, run by the gate).
+- **Verify:** `sh spec/graph-galaxy/verify/gate.sh P7`.
+- **Touches:** `okt-client/src/keys.rs`, `okt-client/src/nav.rs`, `okt-client/src/graph.rs`,
+  `okt-client/src/graph/cam.rs`, `okt-client/src/chrome.rs`, `README.md`, `tests/ui/keys.mjs`,
+  `tests/perf/profile.mjs`, `issues/perf-profile-points.md`, `ROADMAP.md`.
+
+---
+
+## How `code-build` drives this
+
+1. `next_phase.py` prints the next actionable phase (statuses are authoritative; the
+   `current_phase` pointer is reconciled against them).
+2. Pre-flight: the cycle worktree is clean, on `branch`, and `base` is reachable.
+3. Execute every `[ ]` in the phase (consult `PLAN.md` / `research/` for detail).
+4. Run the phase's `verify:` command — never advance on a checkbox alone.
+5. Amend this file freely if reality diverges (regenerate frontmatter with `set_phase.py`; note the
+   amendment in the commit body). STOP and escalate only on a **`GOAL.md` contradiction**.
+6. Mark the phase `done`, advance `current_phase`, `--touch`; one `[{category}]` commit; stop and report.

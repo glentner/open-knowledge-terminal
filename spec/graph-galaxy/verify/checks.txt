@@ -1,0 +1,62 @@
+# Named checks tests/ui/keys.mjs must print as passing: <phase>|<label prefix>|<predicate>.
+# gate.sh step 3 requires a line opening with "ok   <label prefix>" for every row up to the phase
+# (cumulative) or at it (--phase-only). The predicate is the contract the check implements; the
+# gate cannot read it, so code-review grades each check's code against it. Shared rules:
+# - "waits" means: wait for #graph[data-move] to change from its value before the action, then for
+#   data-anim="0". Never wait on data-anim alone (it is still "0" before the first frame).
+# - "timeline" means: an addInitScript MutationObserver records every write of data-theta, data-psi,
+#   data-dist, data-anim and data-labels with performance.now().
+# - "positions" means window.__oktPos (installed empty by addInitScript; the client fills it from the
+#   uploaded position buffer on every upload) and "projects" means applying data-view (the 16-float
+#   view-projection the GL drew the last frame with) to those positions, in the test.
+# - "idx" means /api/index fetched by the test; counts computed from it never come from the client.
+# Existing checks (FILES, GRAPH walk, reading, ANY) keep passing; keys.mjs's exit status covers them.
+P1|layout is stable across a shuffled reload|read data-layout; reload with page.route serving /api/index with nodes and edges shuffled (seeded); data-layout equal and non-empty, and every entry of positions bitwise equal
+P1|layout publishes the card total|data-total equals the idx count of t=file nodes
+P1|adding a card moves nothing outside its folder|write zz-probe.md into an existing folder of $OKT_KB and zz-probe-region/probe.md at its root; wait for the live reload (data-total +2); every position outside those two folders is unchanged, folder and surface nodes included
+P2|canvas renders the scene|hide the overlay canvas; screenshot #graph: at least two colours each over 1% of pixels; orbit; a second screenshot differs
+P2|camera moves ease|timeline: an orbit key, +, and 0 each produce at least 3 intermediate data-theta or data-dist values spread over at least 100 ms
+P2|ArrowRight orbits the azimuth|waits; data-theta changes by 15 +- 1 degrees
+P2|ArrowLeft orbits the azimuth back|waits; data-theta returns within 1 degree
+P2|PageUp tilts the elevation|waits; data-psi changes by 10 +- 1 degrees
+P2|PageDown tilts the elevation back|waits; data-psi returns within 1 degree
+P2|orbit keys leave the layout and the selection|across the four orbit keys: data-layout, data-pos-hash and the hash s= unchanged
+P2|orbit keys leave a focused inspector alone|focus inside the inspector (focus #ibody, made focusable if it is not, with content taller than the pane): ArrowRight, ArrowLeft, PageUp and PageDown leave data-move, data-theta and data-psi unchanged
+P2|ArrowDown still walks in the graph|with a selection, ArrowDown makes #ghint read 1/N and marks a chip; ArrowUp steps back
+P2|+ moves the camera closer|waits; data-dist falls by a factor 1.35 +- 2%
+P2|= moves the camera closer|waits; data-dist falls by a factor 1.35 +- 2%
+P2|- moves the camera away|waits; data-dist rises by a factor 1.35 +- 2%
+P2|0 fits the galaxy and keeps the selection|with a card selected: waits; data-dist equals the galaxy fit (data-dist-galaxy) +- 2%, the hash s= unchanged
+P2|drag orbits the camera|a 200 px horizontal drag on #graph changes data-theta by at least 30 degrees; the selection is unchanged
+P2|wheel zooms the camera|a wheel of deltaY 200 raises data-dist; a ctrl wheel (pinch) of deltaY -100 lowers it
+P2|reduced motion cuts camera moves|context reducedMotion reduce; timeline over an orbit key, +, 0 and a selection: each move writes data-theta/data-dist exactly once with its end value and data-anim is never 1
+P2|the scene survives a lost GL context|WEBGL_lose_context loseContext then restoreContext; the "canvas renders the scene" screenshot test passes again; no page error
+P3|nothing selected shows galaxy scale|empty hash: data-scale galaxy, data-drawn 0 cards, data-dist equals data-dist-galaxy +- 2%
+P3|galaxy draws one cluster per region and the bundles|data-regions equals the idx count of top-level folders; data-bundles equals the idx count of unordered top-level-folder pairs joined by at least one edge (root and surfaces excluded)
+P3|galaxy labels region names only|data-labels has entries and every entry's kind is region
+P3|a folder selects system scale on its region|select a subfolder: waits; data-scale system, data-region its top-level folder; the region's positions project inside the pane with extent 0.6 to 0.8
+P3|system scale puts the other regions on the rim|data-rim equals data-regions - 1
+P3|zooming out crosses to galaxy and keeps the selection|from a card at focus scale press - until data-scale is galaxy; the recorded data-scale sequence is focus, system, galaxy; the hash s= never changes
+P3|zooming in at galaxy enters system scale on the region nearest the centre|with nothing selected orbit to a known pose, press + until data-scale is system; data-region equals the in-front region whose core projects nearest the pane centre, computed from positions; no selection
+P3|show all draws every card and every edge|toggle .gtools [data-z=all]: data-showall 1, data-drawn equals the idx file count, data-edges equals the idx count of edges whose two ends are both nodes; collapse a folder first and it still holds
+P4|a card selects focus scale|select the hub: waits; data-scale focus, data-focus the hub
+P4|the focus camera faces the smallest principal axis|the test computes, from positions of data-focus-ids, the covariance and its eigenvectors; when lambda1/lambda0 >= 1.1 the view direction from data-view satisfies abs(dot(dir, e0)) >= 0.99; the fitted members project with extent 0.6 to 0.8
+P4|show all off draws only the tiers|with auto-collapse off (settings collapse 1000000 written to localStorage before load), data-drawn equals, computed from idx, the hub's region's cards plus the hub's direct links in any region; data-edges equals the edges the R8 rule selects, computed from idx
+P4|cards in other regions fold into their cluster|with auto-collapse off, for a hub whose two-hop set reaches another region, data-drawn-regions per other region equals the hub's direct links in it
+P4|a graph click eases the camera to the card|click the screen point of a drawn tier-1 card, computed by projecting positions; waits; data-focus is that card; the timeline shows an eased move
+P5|at most 24 card labels|on the hub and in show all: data-label-cands above 24, card-kind entries (every kind except region) between 12 and 24
+P5|no two labels overlap|all data-labels rects, region names included, pairwise disjoint within 1 px
+P5|labels stay capped in show all|show all on: card-kind entries at most 24 and disjoint
+P5|labels stay capped and apart while orbiting|timeline over a 1 s drag orbit: every recorded data-labels value has at most 24 card-kind entries and disjoint rects
+P6|z re-solves the camera and keeps the layout|orbit 60 degrees, press z: waits; theta or psi moves by at least 5 degrees; data-layout, data-pos-hash and positions unchanged
+P6|z frames the Results matches|FIND a word with matches in at least two regions, press z in Results: waits; data-focus-n equals the match count; every match projects inside the pane, extent 0.6 to 0.8
+P6|j steps clockwise in screen order|walk the hub N times (N from #ghint): each target visited once; the angles the test computes by projecting positions around the hub increase with exactly one wrap; data-walk equals the marked chip at each step
+P6|a target in another region shows as a portal|walk to a cross-region target: data-labels has a portal entry whose text holds the target path; data-rim at least 1
+P6|the inspector marks the walk target|#ibody .nchip.kb[data-go] equals data-walk
+P6|the walk mark survives an inspector render|switch the inspector tab away and back: the mark is still on data-walk
+P7|space flies to the walk target|j then space: the hash s= equals the prior data-walk; history.length +1; the timeline's move lasts 500 to 800 ms and its peak data-dist is at least twice both endpoints
+P7|Enter flies to the walk target|as space, with Enter
+P7|[ eases back to the previous focus|orbit 40 degrees, fly, press [: waits; the hash and data-focus are back; theta, psi, dist within 0.5 of their values before the flight; the timeline shows an eased move
+P7|] goes forward again|press ]: waits; the hash is the flight's target and the pose matches the flight's end within 0.5
+P7|reduced motion cuts the flight|context reducedMotion reduce: the flight and [ each write the pose exactly once; data-anim never 1
+P7|no borrow panics under interleaved moves|[ mid-flight, j during a selection ease, z during a flight, a wheel run across a scale band, an accent change, the SHOW ALL settings row, context loss mid-flight: no page error and no console message containing "panicked at" or "already borrowed"
