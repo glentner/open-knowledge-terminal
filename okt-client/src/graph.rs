@@ -18,6 +18,12 @@
 //! the focus and its links in any region, two hops dim and the rest of its region faint, nothing
 //! else but the region glyphs; or every card and link under "show all".
 //!
+//! At most `labels::MAX_CARD_LABELS` cards are named at once, flat on the overlay: the focus and
+//! its links (or, under show all, every card), by tier and then importance, never two labels on
+//! top of each other. Which cards are named is decided when the camera comes to rest and frozen
+//! while it moves; each frame only re-picks the side each label sits on, and hides one that fits
+//! nowhere, so nothing pops in mid-motion and nothing overlaps.
+//!
 //! Frames are drawn on demand. Input handlers never draw: every camera move goes through
 //! `cam_to`, which starts an ease (or cuts, under reduced motion) and schedules a frame. The frame
 //! evaluates the pose, projects and sorts the drawn points, draws, and only then, with no graph
@@ -25,6 +31,7 @@
 
 mod cam;
 mod gl;
+mod labels;
 mod overlay;
 mod space;
 mod vis;
@@ -73,6 +80,10 @@ const DOT_PX: f64 = 2.5;
 const RIM_PX: f64 = 5.0;
 /// Segments per bundle curve.
 const BUNDLE_SEGS: usize = 12;
+/// How long the camera must be still before the labelled cards are chosen again, in ms.
+const LABEL_REST_MS: f64 = 150.0;
+/// A portal label's path is cut in the middle to this many characters.
+const PORTAL_CHARS: usize = 34;
 
 // ---- collapse: which node stands for each id -------------------------------------------------
 
@@ -409,6 +420,45 @@ struct Pick {
     i: usize,
 }
 
+/// A region's name, to place beside its glyph at (`x`, `y`), radius `r` px, leaning toward
+/// `lean` (the pane centre, for a glyph on the rim). Larger `prio` is placed first.
+struct Name {
+    x: f64,
+    y: f64,
+    r: f64,
+    lean: [f64; 2],
+    text: String,
+    prio: usize,
+}
+
+/// Which cards are labelled, and how the labels have been moving.
+#[derive(Default)]
+struct LabelSet {
+    /// the cards labelled at the last choice, kept while the camera moves
+    set: Vec<usize>,
+    /// choose again at the next frame (the tiers, the walk, the pane or the fonts changed)
+    stale: bool,
+    /// the side each card's label sat on last frame
+    anchors: HashMap<usize, labels::Anchor>,
+    /// the pose the last frame drew, and when it last changed
+    pose: Option<Pose>,
+    moved_at: f64,
+    /// chosen since the camera came to rest
+    rested: bool,
+    /// the walk target the last choice saw
+    cursor: Option<usize>,
+}
+
+impl LabelSet {
+    fn invalidate(&mut self) {
+        self.stale = true;
+    }
+    /// A frame is still owed: the camera has moved since the last choice at rest.
+    fn owed(&self) -> bool {
+        self.stale || !self.rested
+    }
+}
+
 pub struct G {
     canvas: Option<HtmlCanvasElement>,
     gl: Option<gl::Renderer>,
@@ -474,6 +524,13 @@ pub struct G {
     /// the pane chrome the rim and the compass keep clear of: the toolbar's right edge, the
     /// legend's height and its right edge, CSS px from the pane's left, bottom and left edges
     chrome: (f64, f64, f64),
+    /// the toolbar's and the legend's rects in pane CSS px, and the hint's while it shows: the
+    /// labels keep clear of them
+    chrome_rects: Vec<labels::Rect>,
+    hint_rect: Option<labels::Rect>,
+    /// each node's card label (its name, without `.md`) and portal label (its path, cut short)
+    texts: Rc<Vec<(String, String)>>,
+    lab: LabelSet,
     raf: i32,
     drag: Option<Drag>,
     built: bool,
@@ -632,7 +689,8 @@ thread_local! {
         pose: Pose { target: [0.0; 3], theta: THETA0, psi: PSI0, ln_d: 8.0 },
         anim: None, autofit: true, fit: Fit::Galaxy, moves: 0, picks: vec![], hover: None,
         cursor: None, flash: vec![], w: 0.0, h: 0.0, dpr: 1.0, host_rect: (0.0, 0.0, 0.0, 0.0),
-        chrome: (0.0, 0.0, 0.0),
+        chrome: (0.0, 0.0, 0.0), chrome_rects: vec![], hint_rect: None, texts: Rc::new(vec![]),
+        lab: LabelSet::default(),
         raf: 0, drag: None, built: false,
     })));
 }
@@ -673,6 +731,18 @@ pub fn build(flash: &[String]) {
         .map(|(i, id)| (id.clone(), i))
         .collect();
     let nodes: Vec<NodeVis> = idx.nodes.iter().map(|n| vis_of(&idx, n)).collect();
+    let texts: Vec<(String, String)> = idx
+        .nodes
+        .iter()
+        .map(|n| {
+            let name = idx.name_of(&n.id);
+            let card = match name.strip_suffix(".md") {
+                Some(s) if n.t == "file" => s.to_string(),
+                _ => name,
+            };
+            (card, labels::ellipsize_middle(&n.id, PORTAL_CHARS))
+        })
+        .collect();
     let edges: Vec<(u32, u32, bool)> = idx
         .edges
         .iter()
@@ -729,6 +799,11 @@ pub fn build(flash: &[String]) {
         gs.ids = Rc::new(ids);
         gs.at = at;
         gs.nodes = nodes;
+        gs.texts = Rc::new(texts);
+        gs.lab.anchors.clear();
+        gs.lab.set.clear();
+        gs.lab.cursor = None;
+        gs.lab.invalidate();
         gs.edges = edges;
         gs.vis = vis;
         gs.region_node = region_node;
@@ -766,26 +841,33 @@ pub fn build(flash: &[String]) {
     update();
     publish_space(&lnodes, &sp, idx.files().count());
     render_legend(&idx);
-    let chrome = chrome_insets();
-    g().chrome = chrome;
+    let (chrome, rects) = chrome_insets();
+    let mut gs = g();
+    gs.chrome = chrome;
+    gs.chrome_rects = rects;
+    gs.lab.invalidate();
 }
 
 /// How far the toolbar reaches in from the pane's left edge, and the legend up from its bottom
 /// and in from its left edge (zero for any when it is not shown), so rim glyphs and the compass
-/// keep clear of them.
-fn chrome_insets() -> (f64, f64, f64) {
+/// keep clear of them; and the two rects in pane CSS px, which labels keep clear of.
+fn chrome_insets() -> ((f64, f64, f64), Vec<labels::Rect>) {
     let Some(host) = dom::try_id("v-graph") else {
-        return (0.0, 0.0, 0.0);
+        return ((0.0, 0.0, 0.0), Vec::new());
     };
     let hr = host.get_bounding_client_rect();
-    let left = dom::q(".gtools")
+    let tools = dom::q(".gtools")
         .map(|t| t.get_bounding_client_rect())
-        .filter(|r| r.width() > 0.0)
-        .map(|r| r.right() - hr.left())
-        .unwrap_or(0.0);
+        .filter(|r| r.width() > 0.0);
+    let left = tools.as_ref().map(|r| r.right() - hr.left()).unwrap_or(0.0);
     let legend = dom::try_id("glegend")
         .map(|l| l.get_bounding_client_rect())
         .filter(|r| r.width() > 0.0);
+    let rects = tools
+        .iter()
+        .chain(legend.iter())
+        .map(|r| pane_rect(r, &hr))
+        .collect();
     let bottom = legend
         .as_ref()
         .map(|r| hr.bottom() - r.top())
@@ -794,7 +876,17 @@ fn chrome_insets() -> (f64, f64, f64) {
         .as_ref()
         .map(|r| r.right() - hr.left())
         .unwrap_or(0.0);
-    (left.max(0.0), bottom.max(0.0), right.max(0.0))
+    ((left.max(0.0), bottom.max(0.0), right.max(0.0)), rects)
+}
+
+/// A client rect as a rect in the pane `host`'s CSS px.
+fn pane_rect(r: &web_sys::DomRect, host: &web_sys::DomRect) -> labels::Rect {
+    labels::Rect {
+        x: r.left() - host.left(),
+        y: r.top() - host.top(),
+        w: r.width(),
+        h: r.height(),
+    }
 }
 
 /// Publish the 3D layout for tests: `#graph[data-layout]` (its fingerprint) and
@@ -1080,7 +1172,9 @@ pub fn recolor() {
         gs.ov.as_ref().map(Colors::read)
     };
     if colors.is_some() {
-        g().colors = colors;
+        let mut gs = g();
+        gs.colors = colors;
+        gs.lab.invalidate();
     }
     update();
 }
@@ -1430,6 +1524,7 @@ fn retier() {
         gs.drawn = Rc::new(t.drawn);
         gs.subs = t.subs;
         gs.portals = t.portals;
+        gs.lab.invalidate();
     }
     sync_instances();
     schedule();
@@ -1449,6 +1544,19 @@ fn set_hint(t: &str) {
     };
     dom::set_hidden(&el, t.is_empty());
     dom::set_text(&el, t);
+    let rect = match (t.is_empty(), dom::try_id("v-graph")) {
+        (false, Some(host)) => Some(pane_rect(
+            &el.get_bounding_client_rect(),
+            &host.get_bounding_client_rect(),
+        ))
+        .filter(|r| r.w > 0.0),
+        _ => None,
+    };
+    let mut gs = g();
+    if gs.hint_rect != rect {
+        gs.hint_rect = rect;
+        gs.lab.invalidate();
+    }
 }
 
 // ---- drawing -------------------------------------------------------------------------------
@@ -1483,10 +1591,10 @@ fn frame_tick(now: f64) {
         }
         render(&mut gs, now)
     };
-    if let Some((drawn, uploaded, labels)) = out {
+    if let Some((drawn, uploaded, (labels, cands))) = out {
         if let Some(cv) = dom::try_id("graph") {
             gl::publish(&cv, &drawn);
-            overlay::publish(&cv, &labels);
+            overlay::publish(&cv, &labels, cands);
         }
         if let Some((ids, inst)) = uploaded {
             gl::publish_positions(&ids, &inst);
@@ -1496,7 +1604,9 @@ fn frame_tick(now: f64) {
     let again = {
         let mut gs = g();
         gs.flash.retain(|(_, t0)| now - t0 < 3200.0);
-        gs.anim.is_some() || !gs.flash.is_empty()
+        // the labels are chosen again once the camera has been still for a moment
+        let labels_owed = gs.lab.owed() && gs.w > 0.0 && gs.built;
+        gs.anim.is_some() || !gs.flash.is_empty() || labels_owed
     };
     if again {
         schedule();
@@ -1512,7 +1622,7 @@ struct Glyphs {
     under: Vec<gl::Mark>,
     halos: Vec<gl::Mark>,
     marks: Vec<gl::Mark>,
-    names: Vec<(usize, overlay::Name)>,
+    names: Vec<Name>,
     picks: Vec<Pick>,
     regions: usize,
     rim: usize,
@@ -1645,16 +1755,15 @@ fn glyphs(gs: &G, pose: &Pose, pane: Pane, unit: f64) -> Glyphs {
             let (dx, dy) = (centre[0] - p[0], centre[1] - p[1]);
             let l = dx.hypot(dy).max(1e-9);
             let lean = if active { 0.0 } else { w };
-            out.names.push((
-                cards as usize,
-                overlay::Name {
-                    x: p[0],
-                    y: p[1],
-                    r: radius,
-                    inward: [dx / l * lean + (1.0 - lean), dy / l * lean],
-                    text: gs.vis.regions[r].trim_end_matches('/').to_string(),
-                },
-            ));
+            out.names.push(Name {
+                x: p[0],
+                y: p[1],
+                r: radius,
+                lean: [dx / l * lean + (1.0 - lean), dy / l * lean],
+                text: gs.vis.regions[r].trim_end_matches('/').to_string(),
+                // the active region's name first, then the larger regions
+                prio: if active { usize::MAX } else { cards as usize },
+            });
         }
     }
     // the active region's subfolders
@@ -1728,7 +1837,7 @@ fn glyphs(gs: &G, pose: &Pose, pane: Pane, unit: f64) -> Glyphs {
 
 /// Draw one frame at the current pose: project the drawn points, sort them far to near, place the
 /// glyphs, draw the GL scene and the overlay, and keep what was drawn for picking and the hooks.
-fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, Vec<overlay::Placed>)> {
+fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Placed>, usize))> {
     if gs.w <= 0.0 || gs.h <= 0.0 || !gs.built {
         return None;
     }
@@ -1797,6 +1906,7 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, Vec<overlay::Pla
         }
     }
     let cards = tiers.iter().sum::<usize>();
+    let drawn_regions = serde_json::to_string(&by_region).unwrap_or_default();
     let focus_n = gs
         .inst
         .col
@@ -1925,9 +2035,8 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, Vec<overlay::Pla
             dashed: true,
         });
     }
-    let mut names = gly.names;
-    names.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.text.cmp(&b.1.text)));
-    let names: Vec<overlay::Name> = names.into_iter().map(|(_, n)| n).collect();
+    let mut names = std::mem::take(&mut gly.names);
+    names.sort_by(|a, b| b.prio.cmp(&a.prio).then_with(|| a.text.cmp(&b.text)));
     // the compass: the galaxy's axes and horizon as the camera sees them, the focused region's
     // direction, and the scale
     let b = cam::basis(pose.theta, pose.psi);
@@ -1951,18 +2060,28 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, Vec<overlay::Pla
         far: c.compass.1.clone(),
         accent: accent_css.clone(),
     });
-    let labels = match &gs.ov {
-        Some(ov) => ov.draw(
+    let labels = place_labels(
+        gs,
+        now,
+        &pose,
+        pane,
+        unit,
+        &items,
+        &names,
+        &gly.at,
+        compass.as_ref(),
+    );
+    if let Some(ov) = &gs.ov {
+        ov.draw(
             gs.w,
             gs.h,
             gs.dpr,
             &accent_css,
             &rings,
-            &names,
+            &labels.0,
             compass.as_ref(),
-        ),
-        None => Vec::new(),
-    };
+        );
+    }
     gs.picks = picks;
     let (edges, gl_bundles) = counts?;
     let drawn = gl::Drawn {
@@ -1993,9 +2112,162 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, Vec<overlay::Pla
         focus_n,
         focus_ids: serde_json::to_string(&*gs.focus_ids).unwrap_or_default(),
         tiers,
-        drawn_regions: serde_json::to_string(&by_region).unwrap_or_default(),
+        drawn_regions,
     };
     Some((drawn, uploaded, labels))
+}
+
+/// The labels of one frame, and how many cards could have been labelled before the cap.
+///
+/// The candidates are the cards drawn at tier 0 and 1 (the focus and its links, each link in
+/// another region as a portal labelled with its path), or every card drawn under show all; at
+/// galaxy scale without show all there are none. Which of them are labelled is chosen when the
+/// tiers, the walk target or the pane change, and again once the camera has been still for
+/// `LABEL_REST_MS`; while it moves, only the cards chosen last are placed again (each trying the
+/// side it was on first, hidden for a frame where it fits nowhere), with the walk target always
+/// among them. A card is labelled at its point when the point is on the pane; a portal whose card
+/// is off the pane is labelled at its region's glyph.
+#[allow(clippy::too_many_arguments)]
+fn place_labels(
+    gs: &mut G,
+    now: f64,
+    pose: &Pose,
+    pane: Pane,
+    unit: f64,
+    items: &[(f64, u32, f64, f64)],
+    names: &[Name],
+    glyph_at: &[Option<[f64; 2]>],
+    compass: Option<&overlay::Compass>,
+) -> (Vec<labels::Placed>, usize) {
+    let Some(ov) = gs.ov.as_ref() else {
+        return (Vec::new(), 0);
+    };
+    let lab = &mut gs.lab;
+    if lab.pose != Some(*pose) {
+        lab.pose = Some(*pose);
+        lab.moved_at = now;
+        lab.rested = false;
+    }
+    if lab.cursor != gs.cursor {
+        lab.cursor = gs.cursor;
+        lab.stale = true;
+    }
+    let resting = now - lab.moved_at >= LABEL_REST_MS;
+    let choose = lab.stale || (resting && !lab.rested);
+    let any_scale = gs.show_all || gs.scale != Scale::Galaxy;
+    let texts = gs.texts.clone();
+    let centre = [pane.w / 2.0, pane.h / 2.0];
+    let inside = |x: f64, y: f64| x >= 0.0 && y >= 0.0 && x <= pane.w && y <= pane.h;
+    let px_r = |i: usize, s: f64| (gs.nodes[i].r * unit / s).clamp(1.6, POINT_MAX_PX);
+    let mut cands: Vec<labels::Cand> = Vec::new();
+    let mut n_cands = 0;
+    let mut focus_disc = None;
+    if any_scale {
+        for &(s, i, x, y) in items {
+            let i = i as usize;
+            let v = &gs.nodes[i];
+            if Some(i) == gs.sel {
+                let r = px_r(i, s);
+                focus_disc = Some(labels::Rect {
+                    x: x - r,
+                    y: y - r,
+                    w: 2.0 * r,
+                    h: 2.0 * r,
+                });
+            }
+            let tier = gs
+                .inst
+                .col
+                .get(i * 4 + 3)
+                .map(|c| tier_code(*c))
+                .unwrap_or(4);
+            if v.kind == Kind::Root || tier > 3 || (!gs.show_all && tier > 1) {
+                continue;
+            }
+            n_cands += 1;
+            let walk = Some(i) == gs.cursor;
+            if !choose && !walk && !lab.set.contains(&i) {
+                continue;
+            }
+            let portal = gs.portals.iter().find(|p| p.to == i);
+            let (kind, text) = match (portal, v.kind) {
+                (Some(_), _) => (labels::Kind::Portal, texts[i].1.as_str()),
+                _ if Some(i) == gs.sel => (labels::Kind::Focus, texts[i].0.as_str()),
+                (_, Kind::Dir) => (labels::Kind::Folder, texts[i].0.as_str()),
+                _ => (labels::Kind::Card, texts[i].0.as_str()),
+            };
+            // where it is named: at its point on the pane, or a portal at its region's glyph
+            let at = if inside(x, y) {
+                Some((x, y, px_r(i, s), [0.0, 0.0]))
+            } else {
+                portal
+                    .and_then(|p| glyph_at.get(p.region).copied().flatten())
+                    .map(|g| {
+                        let (dx, dy) = (centre[0] - g[0], centre[1] - g[1]);
+                        let l = dx.hypot(dy).max(1e-9);
+                        (g[0], g[1], RIM_PX + 2.0, [dx / l, dy / l])
+                    })
+            };
+            let Some((x, y, r, lean)) = at else { continue };
+            let (w, h) = ov.measure(kind, text);
+            cands.push(labels::Cand {
+                key: i,
+                kind,
+                x,
+                y,
+                r,
+                w,
+                h,
+                tier: tier as u8,
+                walk,
+                importance: v.r,
+                path: gs.ids[i].as_str(),
+                text,
+                lean,
+            });
+        }
+    }
+    for n in names {
+        let (w, h) = ov.measure(labels::Kind::Region, &n.text);
+        cands.push(labels::Cand {
+            key: usize::MAX,
+            kind: labels::Kind::Region,
+            x: n.x,
+            y: n.y,
+            r: n.r,
+            w,
+            h,
+            tier: 0,
+            walk: false,
+            importance: 0.0,
+            path: "",
+            text: &n.text,
+            lean: n.lean,
+        });
+    }
+    let mut obstacles: Vec<labels::Rect> = gs.chrome_rects.clone();
+    obstacles.extend(gs.hint_rect);
+    obstacles.extend(compass.map(|c| overlay::compass_box(gs.w, gs.h, c.lift)));
+    obstacles.extend(focus_disc);
+    let anchors = &lab.anchors;
+    let placed = labels::place(&cands, &obstacles, (gs.w, gs.h), &|k| {
+        anchors.get(&k).copied()
+    });
+    for p in placed.iter().filter(|p| p.kind.counted()) {
+        lab.anchors.insert(p.key, p.anchor);
+    }
+    if choose {
+        lab.set = placed
+            .iter()
+            .filter(|p| p.kind.counted())
+            .map(|p| p.key)
+            .collect();
+        lab.stale = false;
+        if resting {
+            lab.rested = true;
+        }
+    }
+    (placed, n_cands)
 }
 
 /// When a test has put an array on `window.__oktDraw`, keep the last few hundred frame times on it
@@ -2324,10 +2596,12 @@ pub fn toggle_collapse(id: &str, force: Option<bool>) {
 fn resize() {
     let host = dom::id("v-graph");
     let r = host.get_bounding_client_rect();
-    let chrome = chrome_insets();
+    let (chrome, rects) = chrome_insets();
     let refit = {
         let mut gs = g();
         gs.chrome = chrome;
+        gs.chrome_rects = rects;
+        gs.lab.invalidate();
         let changed = gs.w != r.width() || gs.h != r.height();
         gs.w = r.width();
         gs.h = r.height();

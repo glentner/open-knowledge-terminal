@@ -17,6 +17,9 @@
 //          card and its links in its region, fitted to the pane; only the tiers are drawn (the
 //          focus and its links anywhere, two hops and the rest of its region inside it), other
 //          regions' cards fold into their glyphs; a graph click eases to the card clicked
+//   LABELS at most 24 cards labelled at once (region names not counted), flat on the overlay,
+//          never two labels overlapping: at rest on the hub, under show all, and through a drag
+//          orbit
 //   LAYOUT the 3D layout: stable across a shuffled reload, and adding cards (written into the
 //          env.sh clone, $OKT_KB) moves nothing outside their folders
 //   node tests/ui/keys.mjs [okt-url]
@@ -745,6 +748,79 @@ const facing = async () => {
       after.focus === c.id && after.scale === 'focus' && Object.values(e).some(x => x.mid >= 3 && x.span >= 100),
       { card: c.id, room: +c.room.toFixed(1), focus: after.focus, ...e });
   }
+}
+
+// ---- LABELS ---------------------------------------------------------------------------------
+// data-labels rows are [x, y, w, h, kind, text]; every kind but "region" names a card. Two rects
+// overlap when they share more than 1 px on both axes.
+const cardLabels = ls => ls.filter(l => l[4] !== 'region');
+const overlaps = ls => {
+  const out = [];
+  for (let i = 0; i < ls.length; i++) for (let j = i + 1; j < ls.length; j++) {
+    const [ax, ay, aw, ah] = ls[i], [bx, by, bw, bh] = ls[j];
+    if (ax < bx + bw - 1 && bx < ax + aw - 1 && ay < by + bh - 1 && by < ay + ah - 1) out.push([ls[i], ls[j]]);
+  }
+  return out;
+};
+// the labels once the camera has rested long enough for them to be chosen again
+const restedLabels = async () => {
+  await page.waitForTimeout(400);
+  await twoFrames(page);
+  const v = await page.evaluate(() => { const g = document.getElementById('graph'); return [g.getAttribute('data-labels'), g.getAttribute('data-label-cands'), g.getAttribute('data-anim')]; });
+  return { labels: JSON.parse(v[0] || '[]'), cands: +v[1], anim: v[2] };
+};
+const showAll = async on => {
+  if ((await gattr('data-showall')) !== (on ? '1' : '0')) await page.locator('.gtools [data-z=all]').click();
+  await page.waitForFunction(w => document.getElementById('graph').getAttribute('data-showall') === w, on ? '1' : '0', { timeout: 5000 }).catch(() => {});
+  await twoFrames(page);
+};
+{
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(hub)));
+  await page.evaluate(() => document.activeElement?.blur());
+  await showAll(false);
+  const a = await restedLabels();
+  await showAll(true);
+  const b = await restedLabels();
+  const n = r => cardLabels(r.labels).length;
+  check('at most 24 card labels',
+    a.cands > 24 && n(a) >= 12 && n(a) <= 24 && b.cands > 24 && n(b) >= 12 && n(b) <= 24,
+    { hub: { cands: a.cands, cards: n(a), regions: a.labels.length - n(a) }, showAll: { cands: b.cands, cards: n(b), regions: b.labels.length - n(b) } });
+  const both = [a, b].map(r => overlaps(r.labels));
+  check('no two labels overlap',
+    a.labels.length > 0 && b.labels.length > 0 && both.every(o => o.length === 0),
+    { hub: a.labels.length, showAll: b.labels.length, overlaps: both.map(o => o.slice(0, 2)) });
+  // show all at the galaxy fit as well: every card a candidate
+  await waits(() => page.keyboard.press('0'));
+  const c = await restedLabels();
+  check('labels stay capped in show all',
+    n(b) <= 24 && n(c) <= 24 && c.cands > 24 && overlaps(b.labels).length === 0 && overlaps(c.labels).length === 0,
+    { hub: n(b), galaxy: { cands: c.cands, cards: n(c), regions: c.labels.length - n(c) }, overlaps: overlaps(c.labels).slice(0, 2) });
+  await showAll(false);
+  // a 1 s drag orbit around the hub (reached again by way of another selection, since 0 kept it):
+  // every data-labels value written on the way
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(outer)));
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(hub)));
+  await restedLabels();
+  const box = await page.locator('#graph').boundingBox();
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  const i = await tlLen();
+  const start = JSON.parse((await gattr('data-labels')) || '[]');
+  await page.mouse.move(cx - 150, cy + 40);
+  await page.mouse.down();
+  const t0 = Date.now();
+  for (let k = 1; k <= 60 && Date.now() - t0 < 1000; k++) {
+    await page.mouse.move(cx - 150 + k * 5, cy + 40 - k * 1.5);
+    await page.waitForTimeout(16);
+  }
+  const span = Date.now() - t0;
+  await page.mouse.up();
+  await twoFrames(page);
+  const seen = [start, ...(await tlFrom(i)).filter(e => e[1] === 'data-labels').map(e => JSON.parse(e[2] || '[]'))];
+  const bad = seen.map((ls, k) => ({ k, cards: cardLabels(ls).length, overlaps: overlaps(ls).length })).filter(v => v.cards > 24 || v.overlaps > 0);
+  const most = Math.max(...seen.map(ls => cardLabels(ls).length));
+  check('labels stay capped and apart while orbiting',
+    span >= 900 && seen.length >= 5 && most >= 1 && bad.length === 0,
+    { span, values: seen.length, most, bad: bad.slice(0, 3) });
 }
 
 // ---- LAYOUT ---------------------------------------------------------------------------------

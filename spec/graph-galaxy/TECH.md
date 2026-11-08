@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feat/graph-galaxy
 base: main
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-08'
 phases:
 - id: P1
@@ -59,7 +59,7 @@ phases:
   verify: sh spec/graph-galaxy/verify/gate.sh P4
 - id: P5
   name: Flat label overlay and compass
-  status: pending
+  status: done
   satisfies:
   - R9
   depends_on:
@@ -509,21 +509,52 @@ depth cues, under a spherical camera.
 overlap each other, region names or the pane chrome, at rest or in motion. The walk target's label
 is placed first.
 
-- [ ] `graph/labels.rs` (pure): `const MAX_CARD_LABELS: usize = 24;` and
+- [x] `graph/labels.rs` (pure): `const MAX_CARD_LABELS: usize = 24;` and
       `place(cands, obstacles, pane, last_anchor) -> Vec<Placed>`. Tests:
   - `cap_24`: at most 24 non-region labels over random scenes of up to 2000 candidates.
   - `no_overlap`: all placed rects pairwise disjoint, region names included.
   - `fill_order`: tier, walk target, importance, path; a colliding region name is dropped.
   - `walk_target_before_regions`: the walk target's label survives a colliding region name.
-- [ ] `graph/overlay.rs`:
+- [x] `graph/overlay.rs`:
   - draws exactly the `Placed` list, measured with the metrics and DPR it draws with, each label's
     text clipped to its rect;
   - writes `data-labels` (`[x,y,w,h,kind,text]`) and `data-label-cands` from that list;
   - keeps a `measureText` cache;
   - freezes the label set during motion and re-solves 150 ms after rest;
   - card text drops `.md`; portal text is middle-ellipsised to 34 characters (row D7: portals count).
-- [ ] `app.css`: overlay label rules (size, weight, knockout in `--graph-bg`).
-- [ ] `tests/ui/keys.mjs`: the P5 rows.
+- [x] `app.css`: overlay label rules (size, weight, knockout in `--graph-bg`).
+- [x] `tests/ui/keys.mjs`: the P5 rows.
+- *Amended in build (2026-11-08):*
+  - **Compass:** P4 already drew it (bottom right, above the legend when the legend reaches under
+    it). P5 draws no second one: `overlay::compass_box` gives its box, and every label, region
+    names included, keeps clear of it.
+  - **One placer:** `labels::place(cands, obstacles, pane, last_anchor)` places the region names
+    too (they moved out of `overlay.rs`), the active region's name first, then the larger regions.
+    `last_anchor` is a lookup closure (the module is pure: no hashed collections). A `Cand`
+    carries its kind, tier, walk flag, importance (the card's drawn radius), path and lean;
+    `labels::order` is the fill order. `labels::ellipsize_middle` cuts portal paths, keeping the
+    first folder and the file name when they fit. Two tests beyond the required four:
+    `last_side_first` and `portal_text_ellipsis`.
+  - **Kinds** in `data-labels`: `region`, `focus` (the selection), `card`, `folder`, `portal`.
+    Every kind but `region` counts against the 24.
+  - **Candidates:** the drawn nodes at tier 0 and 1 (cards, folders, external systems; never the
+    root), or every drawn node under show all, at any scale, the galaxy fit included (show all
+    overrides the galaxy look, as it already does for the cards). Without show all, galaxy scale
+    has none. `data-label-cands` counts the candidates in front of the camera.
+  - **Where a label sits:** at its point when the point is on the pane. A portal whose card is
+    off the pane is labelled at its region's glyph, leaning toward the pane centre; a card off the
+    pane is not labelled.
+  - **Obstacles:** the `.gtools` and `#glegend` rects (read at build and on resize), `#ghint`'s
+    (read when its text changes), the compass box and the focus's disc.
+  - **Motion:** a frame whose pose differs from the last is motion. The labelled set is chosen
+    again when it is stale (the tiers, the walk target, the pane, the hint or the fonts changed)
+    and once the pose has been still for 150 ms; the frame loop keeps running until that choice
+    is made. In between, only the chosen cards are placed again, with the walk target always
+    among them.
+  - **Text:** each rect is the `measureText` width in the label's own font plus a px either side
+    for the knockout stroke; the text is clipped to it. Region names are now drawn in `--ink`
+    (they were `--ink-2`, which card labels take), so the two read apart.
+  - Not built, and not in PLAN § 2.6: the research brief's 120 ms fade-in and clickable labels.
 - **Verify:** `sh spec/graph-galaxy/verify/gate.sh P5`.
 - **Touches:** `okt-client/src/graph/{labels,overlay}.rs`, `okt-client/src/graph.rs`,
   `okt-client/static/app.css`, `tests/ui/keys.mjs`.

@@ -189,9 +189,12 @@ a { color: inherit; }
 #graph { width: 100%; height: 100%; display: block; cursor: grab; user-select: none; touch-action: none; }
 #graph.onnode { cursor: pointer; }
 #graph.orbiting { cursor: grabbing; }
-/* the flat overlay over the GL canvas: region names, hover and walk rings; never takes the
-   pointer. Its font and colour are the region names', knocked out of --graph-bg */
-#goverlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; font: 600 10.5px var(--mono); letter-spacing: .04em; color: var(--ink-2); }
+/* the flat overlay over the GL canvas: region names, card labels (at most 24), hover and walk
+   rings, the compass; never takes the pointer. Its font and colour are the region names'; the
+   --glab-* properties are the card labels' (the focus bold, portals and the focus in the accent).
+   Every label is knocked out of --graph-bg */
+#goverlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; font: 600 10.5px var(--mono); letter-spacing: .04em; color: var(--ink);
+  --glab-font: 400 10px var(--mono); --glab-focus-font: 700 10.5px var(--mono); --glab-ink: var(--ink-2); --glab-accent: var(--accent-text); }
 .gtools { position: absolute; left: 10px; top: 10px; display: flex; flex-direction: column; gap: 3px; }
 .gtools button { width: 26px; height: 24px; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink-2); font-size: 12px; }
 .gtools button:hover, .gtools button.on { border-color: var(--accent); color: var(--accent-text); }
