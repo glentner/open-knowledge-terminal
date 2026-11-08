@@ -789,12 +789,19 @@ const showAll = async on => {
   check('no two labels overlap',
     a.labels.length > 0 && b.labels.length > 0 && both.every(o => o.length === 0),
     { hub: a.labels.length, showAll: b.labels.length, overlaps: both.map(o => o.slice(0, 2)) });
-  // show all at the galaxy fit as well: every card a candidate
+  // show all at the galaxy fit with the hub still selected: every card a candidate
   await waits(() => page.keyboard.press('0'));
   const c = await restedLabels();
   check('labels stay capped in show all',
     n(b) <= 24 && n(c) <= 24 && c.cands > 24 && overlaps(b.labels).length === 0 && overlaps(c.labels).length === 0,
     { hub: n(b), galaxy: { cands: c.cands, cards: n(c), regions: c.labels.length - n(c) }, overlaps: overlaps(c.labels).slice(0, 2) });
+  // show all with nothing selected: the galaxy still names its regions only
+  await waits(() => go('#v=graph'));
+  const d = await restedLabels();
+  const dScale = await gattr('data-scale');
+  check('show all at the galaxy labels region names only',
+    (await gattr('data-showall')) === '1' && (await state()).sel === '' && dScale === 'galaxy' && d.cands === 0 && d.labels.length > 0 && d.labels.every(l => l[4] === 'region'),
+    { scale: dScale, cands: d.cands, labels: d.labels.length, cards: n(d) });
   await showAll(false);
   // a 1 s drag orbit around the hub (reached again by way of another selection, since 0 kept it):
   // every data-labels value written on the way

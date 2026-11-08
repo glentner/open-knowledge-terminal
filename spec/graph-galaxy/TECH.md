@@ -538,9 +538,15 @@ is placed first.
   - **Kinds** in `data-labels`: `region`, `focus` (the selection), `card`, `folder`, `portal`.
     Every kind but `region` counts against the 24.
   - **Candidates:** the drawn nodes at tier 0 and 1 (cards, folders, external systems; never the
-    root), or every drawn node under show all, at any scale, the galaxy fit included (show all
-    overrides the galaxy look, as it already does for the cards). Without show all, galaxy scale
-    has none. `data-label-cands` counts the candidates in front of the camera.
+    root), or every drawn node under show all. Galaxy scale has none, except under show all with a
+    selection (still capped at 24). `data-label-cands` counts the candidates in front of the
+    camera.
+  - *Foreman ruling (2026-11-08), follow-up commit:* R1 is unconditional. With nothing selected,
+    the galaxy labels region names only, show all or not: R8's show all is about drawing, not
+    labels. The first P5 commit let show all name cards at the galaxy fit with nothing selected;
+    the follow-up stops it, and `verify/checks.txt` gains the P5 row "show all at the galaxy
+    labels region names only" (nothing selected, show all on, at the galaxy fit: data-scale
+    galaxy, data-label-cands 0, every data-labels entry a region).
   - **Where a label sits:** at its point when the point is on the pane. A portal whose card is
     off the pane is labelled at its region's glyph, leaning toward the pane centre; a card off the
     pane is not labelled.

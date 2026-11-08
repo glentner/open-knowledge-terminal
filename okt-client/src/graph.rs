@@ -2121,7 +2121,7 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
 ///
 /// The candidates are the cards drawn at tier 0 and 1 (the focus and its links, each link in
 /// another region as a portal labelled with its path), or every card drawn under show all; at
-/// galaxy scale without show all there are none. Which of them are labelled is chosen when the
+/// galaxy scale there are none, except under show all with a selection. Which of them are labelled is chosen when the
 /// tiers, the walk target or the pane change, and again once the camera has been still for
 /// `LABEL_REST_MS`; while it moves, only the cards chosen last are placed again (each trying the
 /// side it was on first, hidden for a frame where it fits nowhere), with the walk target always
@@ -2154,7 +2154,13 @@ fn place_labels(
     }
     let resting = now - lab.moved_at >= LABEL_REST_MS;
     let choose = lab.stale || (resting && !lab.rested);
-    let any_scale = gs.show_all || gs.scale != Scale::Galaxy;
+    // with nothing selected the galaxy names its regions only, show all or not; with a
+    // selection, show all names cards at any scale
+    let any_scale = if gs.show_all {
+        gs.sel.is_some() || gs.scale != Scale::Galaxy
+    } else {
+        gs.scale != Scale::Galaxy
+    };
     let texts = gs.texts.clone();
     let centre = [pane.w / 2.0, pane.h / 2.0];
     let inside = |x: f64, y: f64| x >= 0.0 && y >= 0.0 && x <= pane.w && y <= pane.h;

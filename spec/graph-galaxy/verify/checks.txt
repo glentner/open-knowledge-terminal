@@ -47,6 +47,7 @@ P4|a graph click eases the camera to the card|click the screen point of a drawn 
 P5|at most 24 card labels|on the hub and in show all: data-label-cands above 24, card-kind entries (every kind except region) between 12 and 24
 P5|no two labels overlap|all data-labels rects, region names included, pairwise disjoint within 1 px
 P5|labels stay capped in show all|show all on: card-kind entries at most 24 and disjoint
+P5|show all at the galaxy labels region names only|nothing selected, show all on, at the galaxy fit: data-scale galaxy, data-label-cands 0, data-labels has entries and every entry's kind is region
 P5|labels stay capped and apart while orbiting|timeline over a 1 s drag orbit: every recorded data-labels value has at most 24 card-kind entries and disjoint rects
 P6|z re-solves the camera and keeps the layout|orbit 60 degrees, press z: waits; theta or psi moves by at least 5 degrees; data-layout, data-pos-hash and positions unchanged
 P6|z frames the Results matches|FIND a word with matches in at least two regions, press z in Results: waits; data-focus-n equals the match count; every match projects inside the pane, extent 0.6 to 0.8
