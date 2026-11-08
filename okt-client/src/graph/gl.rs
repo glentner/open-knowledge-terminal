@@ -11,10 +11,12 @@
 //! uploaded per frame: capsules that are discs when their two ends meet.
 //!
 //! Every pass blends premultiplied "over" with no depth test, in order: edges and bundles, the
-//! marks under the glyphs (lines to the rim), glyph halos (additive on a dark background), points
-//! sorted far to near so nearer cards cover farther ones, then the glyph marks. Depth reads as
-//! falling alpha and saturation and an aerial fade toward the background (`--graph-fog`), never
-//! blur.
+//! marks under the glyphs (lines to the rim, portals), glyph halos and the focus's halo (additive
+//! on a dark background), points sorted far to near so nearer cards cover farther ones, then the
+//! glyph marks. Depth reads as falling alpha and saturation and an aerial fade toward the
+//! background (`--graph-fog`), never blur. A point's tier rides with its style in its colour
+//! texel (`style + 8·tier`): tier 2 (two hops out) and tier 3 (the rest of the focused region)
+//! are drawn at their own alphas.
 //!
 //! The test hooks (`data-*` on `#graph`, `window.__oktPos`) are written here, from what was
 //! drawn and uploaded, never from a camera destination or a parallel computation.
@@ -107,6 +109,10 @@ pub struct Frame<'a> {
     pub fog: [f32; 4],
     /// how much of the bundles shows (1 at galaxy scale, 0 at the rim)
     pub bundle_fade: f32,
+    /// the alpha of a tier-2 and of a tier-3 point
+    pub tier_alpha: (f32, f32),
+    /// the largest radius a point is drawn at, CSS px
+    pub r_max: f32,
     /// lines out to the rim glyphs, under everything else drawn this frame
     pub under: &'a [Mark],
     /// glyph halos
@@ -129,6 +135,8 @@ uniform float u_scale;
 uniform float u_dpr;
 uniform vec2 u_depth;
 uniform vec4 u_fog;
+uniform vec2 u_tier;
+uniform float u_rmax;
 layout(location = 0) in vec2 a_corner;
 layout(location = 1) in uint a_idx;
 out vec2 v_uv;
@@ -141,9 +149,11 @@ void main() {
   vec4 p = texelFetch(u_pos, texel(a_idx), 0);
   vec4 c = texelFetch(u_col, texel(a_idx), 0);
   vec4 clip = u_vp * vec4(p.xyz, 1.0);
-  v_style = int(c.a + 0.5);
+  int packed = int(c.a + 0.5);
+  int tier = packed / 8;
+  v_style = packed - 8 * tier;
   if (clip.w <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
-  float rpx = max(p.w * u_scale / clip.w, 1.6 * u_dpr);
+  float rpx = clamp(p.w * u_scale / clip.w, 1.6 * u_dpr, u_rmax * u_dpr);
   float reach = 1.0;
   if (v_style == 3) { rpx = max(rpx, 3.5 * u_dpr); reach = 2.1; }
   float ext = rpx * reach + 1.0;
@@ -155,7 +165,7 @@ void main() {
   float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
   vec3 rgb = mix(c.rgb, vec3(l), 0.5 * t);
   v_rgb = mix(rgb, u_fog.rgb, 0.45 * t);
-  v_alpha = mix(1.0, 0.5, t);
+  v_alpha = mix(1.0, 0.5, t) * (tier == 2 ? u_tier.x : (tier >= 3 ? u_tier.y : 1.0));
 }
 "#;
 
@@ -298,8 +308,9 @@ void main() {
 "#;
 
 /// The uniforms the programs may use, looked up once per link.
-const UNIFORMS: [&str; 9] = [
-    "u_vp", "u_pos", "u_col", "u_px", "u_scale", "u_dpr", "u_depth", "u_fog", "u_bundle",
+const UNIFORMS: [&str; 11] = [
+    "u_vp", "u_pos", "u_col", "u_px", "u_scale", "u_dpr", "u_depth", "u_fog", "u_bundle", "u_tier",
+    "u_rmax",
 ];
 /// Floats per mark: the two ends, radius, style, and the colour.
 const MARK_FLOATS: usize = 10;
@@ -650,6 +661,8 @@ impl Renderer {
         if !f.order.is_empty() {
             common(&r.pt);
             gl.uniform1f(r.pt.loc("u_scale"), f.scale);
+            gl.uniform2f(r.pt.loc("u_tier"), f.tier_alpha.0, f.tier_alpha.1);
+            gl.uniform1f(r.pt.loc("u_rmax"), f.r_max);
             gl.bind_buffer(Gl::ARRAY_BUFFER, Some(&r.order));
             gl.buffer_data_with_array_buffer_view(
                 Gl::ARRAY_BUFFER,
@@ -688,11 +701,21 @@ pub struct Drawn {
     pub dist: f64,
     pub anim: bool,
     pub vp: [f32; 16],
+    /// cards in the draw list, wherever the camera is
     pub cards: usize,
+    /// link edges drawn, portals included (bundles apart)
     pub edges: usize,
     pub pos_hash: u64,
     pub dist_galaxy: f64,
     pub focus: String,
+    /// nodes uploaded at tier 0 or 1: the focus set
+    pub focus_n: usize,
+    /// JSON: the ids the last card solve fitted
+    pub focus_ids: String,
+    /// cards in the draw list per tier, 0 to 3
+    pub tiers: [usize; 4],
+    /// JSON: cards in the draw list per region key
+    pub drawn_regions: String,
 }
 
 thread_local! {
@@ -732,7 +755,7 @@ pub fn publish(cv: &Element, d: &Drawn) {
             .collect::<Vec<_>>()
             .join(",")
     );
-    let vals: [(&'static str, String); 16] = [
+    let vals: [(&'static str, String); 20] = [
         ("data-scale", d.scale.to_string()),
         ("data-region", d.region.clone()),
         (
@@ -751,6 +774,10 @@ pub fn publish(cv: &Element, d: &Drawn) {
         ("data-pos-hash", format!("{:016x}", d.pos_hash)),
         ("data-dist-galaxy", sig3(d.dist_galaxy)),
         ("data-focus", d.focus.clone()),
+        ("data-focus-n", d.focus_n.to_string()),
+        ("data-focus-ids", d.focus_ids.clone()),
+        ("data-tiers", d.tiers.map(|t| t.to_string()).join(",")),
+        ("data-drawn-regions", d.drawn_regions.clone()),
         ("data-anim", if d.anim { "1" } else { "0" }.to_string()),
     ];
     HOOKS.with(|h| {

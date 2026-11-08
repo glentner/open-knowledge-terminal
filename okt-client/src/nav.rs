@@ -50,13 +50,10 @@ pub fn select(id: Option<&str>, opts: SelOpts) {
             st.tab = t.into();
         }
     }
+    // the graph's camera follows the selection from any source: eased while the graph shows,
+    // cut while it is hidden
     graph::update();
     let view = s().view;
-    if let Some(i) = id {
-        if opts.from != "graph" && view == "graph" {
-            graph::focus_node(i, None);
-        }
-    }
     if view == "files" && opts.from != "tree" {
         views::tree::render();
     }
@@ -225,12 +222,7 @@ async fn apply_hash_inner() {
         st.commit = c.filter(|x| !x.is_empty());
     }
     graph::update();
-    let (now, view) = (state::sel(), s().view);
-    if let Some(n) = &now {
-        if now != prev && view == "graph" {
-            graph::focus_node(n, None);
-        }
-    }
+    let view = s().view;
     if view == "files" {
         views::tree::render();
     }

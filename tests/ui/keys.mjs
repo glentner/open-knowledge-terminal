@@ -13,6 +13,10 @@
 //          a folder brings its region to system scale with the others on the rim; zooming out
 //          crosses focus, system, galaxy and zooming in at galaxy enters the region nearest the
 //          centre, neither touching the selection; show all draws every card and edge
+//   FOCUS  a card brings focus scale, the camera looking along the smallest principal axis of the
+//          card and its links in its region, fitted to the pane; only the tiers are drawn (the
+//          focus and its links anywhere, two hops and the rest of its region inside it), other
+//          regions' cards fold into their glyphs; a graph click eases to the card clicked
 //   LAYOUT the 3D layout: stable across a shuffled reload, and adding cards (written into the
 //          env.sh clone, $OKT_KB) moves nothing outside their folders
 //   node tests/ui/keys.mjs [okt-url]
@@ -82,7 +86,9 @@ const state = () => page.evaluate(() => {
   };
 });
 let fails = 0;
-const check = (label, ok, detail) => { if (!ok) fails++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}${ok ? '' : ': ' + JSON.stringify(detail)}`); };
+// KEYS_VERBOSE=1 prints the detail of passing checks too
+const verbose = !!process.env.KEYS_VERBOSE;
+const check = (label, ok, detail) => { if (!ok) fails++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}${ok && !verbose ? '' : ': ' + JSON.stringify(detail)}`); };
 
 await page.goto(OKT, { waitUntil: 'load' });
 await page.waitForTimeout(2000);
@@ -559,6 +565,186 @@ const scaleState = async () => {
   await page.locator('.gtools [data-z=all]').click();
   await page.waitForFunction(() => document.getElementById('graph').getAttribute('data-showall') === '0', null, { timeout: 5000 }).catch(() => {});
   await key(' ', 500);
+}
+
+// ---- FOCUS ----------------------------------------------------------------------------------
+// The tiers, from idx: link hops from the focus (both directions), never through a folder or the
+// root; tier 0 and 1 drawn in any region, 2 and 3 (the rest) only in the focus's region (its
+// top-level folder, '.' for the root's cards, '@' for the external systems); the root is never
+// drawn. The edge rule: focus to its links, links to links, links to two hops; both ends drawn.
+const regionKey = id => kind[id] === 'surface' ? '@' : id.includes('/') ? id.slice(0, id.indexOf('/') + 1) : '.';
+const adjOf = new Map();
+for (const [s, t] of edgeEnds) for (const [a, b] of [[s, t], [t, s]]) { if (!adjOf.has(a)) adjOf.set(a, new Set()); adjOf.get(a).add(b); }
+const isFolder = id => kind[id] === 'dir' || kind[id] === 'root';
+const tiersOf = f => {
+  const hop = new Map([[f, 0]]);
+  const one = [...(adjOf.get(f) || [])].filter(m => !hop.has(m));
+  for (const m of one) hop.set(m, 1);
+  for (const m of one) if (!isFolder(m)) for (const x of adjOf.get(m) || []) if (!hop.has(x)) hop.set(x, 2);
+  const R = regionKey(f);
+  const tier = id => { const h = hop.has(id) ? hop.get(id) : Infinity; return h <= 1 ? h : regionKey(id) === R ? Math.min(h, 3) : null; };
+  const drawn = id => kind[id] !== 'root' && tier(id) !== null;
+  return { hop, R, tier, drawn };
+};
+const ruleEdges = T => edgeEnds.filter(([s, t]) => {
+  if (!T.drawn(s) || !T.drawn(t)) return false;
+  const a = T.tier(s), b = T.tier(t), lo = Math.min(a, b), hi = Math.max(a, b);
+  return (lo === 0 && hi <= 1) || (lo === 1 && hi <= 2);
+});
+// eigenvalues (ascending) and eigenvectors of a symmetric 3x3 matrix, by cyclic Jacobi
+const eigen3 = m0 => {
+  const a = m0.map(r => r.slice()), v = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  for (let sweep = 0; sweep < 50; sweep++) {
+    if (Math.abs(a[0][1]) + Math.abs(a[0][2]) + Math.abs(a[1][2]) < 1e-14 * (Math.abs(a[0][0]) + Math.abs(a[1][1]) + Math.abs(a[2][2]) + 1e-300)) break;
+    for (const [p, q] of [[0, 1], [0, 2], [1, 2]]) {
+      if (a[p][q] === 0) continue;
+      const th = (a[q][q] - a[p][p]) / (2 * a[p][q]);
+      const t = Math.sign(th || 1) / (Math.abs(th) + Math.sqrt(th * th + 1)), c = 1 / Math.sqrt(t * t + 1), s = t * c;
+      for (let k = 0; k < 3; k++) { const akp = a[k][p], akq = a[k][q]; a[k][p] = c * akp - s * akq; a[k][q] = s * akp + c * akq; }
+      for (let k = 0; k < 3; k++) { const apk = a[p][k], aqk = a[q][k]; a[p][k] = c * apk - s * aqk; a[q][k] = s * apk + c * aqk; }
+      for (let k = 0; k < 3; k++) { const vkp = v[k][p], vkq = v[k][q]; v[k][p] = c * vkp - s * vkq; v[k][q] = s * vkp + c * vkq; }
+    }
+  }
+  return [0, 1, 2].map(k => ({ val: a[k][k], vec: [v[0][k], v[1][k], v[2][k]] })).sort((x, y) => x.val - y.val);
+};
+const focusState = async (pg = page) => {
+  const v = await pg.evaluate(() => { const g = document.getElementById('graph'); return ['data-scale', 'data-focus', 'data-focus-ids', 'data-focus-n', 'data-view', 'data-drawn', 'data-edges', 'data-drawn-regions', 'data-tiers', 'data-anim'].map(k => g.getAttribute(k)); });
+  return { scale: v[0], focus: v[1], ids: JSON.parse(v[2] || '[]'), n: +v[3], view: JSON.parse(v[4] || '[]'), drawn: +v[5], edges: +v[6], regions: JSON.parse(v[7] || '{}'), tiers: v[8], anim: v[9] };
+};
+// a card's fit set as the client solves it: the card and its links in its own region
+const fitSet = id => [id, ...[...(adjOf.get(id) || [])].filter(m => m !== id && kind[m] !== 'root' && regionKey(m) === regionKey(id))];
+// a set's principal axes, from positions: the smallest axis and lambda1/lambda0
+const axesOf = pts => {
+  const mean = [0, 1, 2].map(k => pts.reduce((a, p) => a + p[k], 0) / Math.max(1, pts.length));
+  const cov = [0, 1, 2].map(a => [0, 1, 2].map(b => pts.reduce((acc, p) => acc + (p[a] - mean[a]) * (p[b] - mean[b]), 0) / Math.max(1, pts.length)));
+  const eig = eigen3(cov);
+  return { e0: eig[0].vec, ratio: eig[1].val / Math.max(eig[0].val, 1e-300) };
+};
+// the camera against data-focus-ids: the axis (when it is defined) and the fitted extent
+const facing = async () => {
+  const f = await focusState();
+  const box = await page.locator('#graph').boundingBox();
+  const pos = await page.evaluate(() => window.__oktPos);
+  const pts = f.ids.map(id => pos[id]).filter(Boolean);
+  const { e0, ratio } = axesOf(pts);
+  // the view direction (target toward the eye): clip w is dir . (eye - p), so row 4 is -dir
+  const m = f.view, dl = Math.hypot(m[3], m[7], m[11]);
+  const dir = [-m[3] / dl, -m[7] / dl, -m[11] / dl];
+  const along = Math.abs(dir[0] * e0[0] + dir[1] * e0[1] + dir[2] * e0[2]);
+  const pr = projectAll(f.view, pts, box.width, box.height);
+  const extent = Math.max(0, ...pr.map(p => Math.max(Math.abs(p.nx), Math.abs(p.ny))));
+  const ok = pts.length >= 3 && pts.length === f.ids.length && (ratio < 1.1 || along >= 0.99) && pr.every(p => p.front) && extent >= 0.6 && extent <= 0.8;
+  return { f, ok, detail: { focus: f.focus, members: f.ids.length, ratio: +ratio.toFixed(3), along: +along.toFixed(4), extent: +extent.toFixed(3) } };
+};
+{
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(hub)));
+  const a = await facing();
+  check('a card selects focus scale', a.f.scale === 'focus' && a.f.focus === hub, { hub, scale: a.f.scale, focus: a.f.focus });
+  const same = (ids, id) => { const w = new Set(fitSet(id)); return ids.length === w.size && ids.every(x => w.has(x)); };
+  // when the hub's set has no well-defined axis, the most connected card whose set clearly has
+  // one is solved for as well, so the axis itself is always checked
+  let b = null;
+  if (+a.detail.ratio < 1.1) {
+    const pos = await page.evaluate(() => window.__oktPos);
+    const clear = files.map(n => n.id).filter(id => id !== hub && pos[id])
+      .sort((x, y) => (degree[y] || 0) - (degree[x] || 0))
+      .find(id => { const set = fitSet(id); return set.length >= 5 && set.every(x => pos[x]) && axesOf(set.map(x => pos[x])).ratio >= 1.25; });
+    if (clear) {
+      await waits(() => go('#v=graph&s=' + encodeURIComponent(clear)));
+      b = await facing();
+      b.ok = b.ok && b.f.focus === clear && same(b.f.ids, clear) && +b.detail.ratio >= 1.1;
+    } else {
+      b = { ok: false, detail: { error: 'no card with a well-defined axis' } };
+    }
+  }
+  check('the focus camera faces the smallest principal axis',
+    a.ok && same(a.f.ids, hub) && (!b || b.ok),
+    { hub: a.detail, clear: b && b.detail });
+}
+{
+  // a second context, with auto-collapse off: the settings say collapse 1000000 before the load
+  const cctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
+  try {
+    await cctx.addInitScript(hooks);
+    const cp = await cctx.newPage();
+    cp.on('pageerror', e => errors.push(e.message));
+    cp.on('console', m => { const t = m.text(); if (t.includes('panicked at') || t.includes('already borrowed')) errors.push('console: ' + t); });
+    await cp.goto(OKT + '#v=graph', { waitUntil: 'load' });
+    await cp.evaluate(() => {
+      const kb = JSON.parse(document.getElementById('boot')?.textContent || '{}').kb || 'kb';
+      const k = 'okt:' + kb;
+      const cur = JSON.parse(localStorage.getItem(k) || '{}');
+      localStorage.setItem(k, JSON.stringify({ ...cur, collapse: 1000000 }));
+    });
+    const settle = async h => {
+      await cp.goto(OKT + '#v=graph&s=' + encodeURIComponent(h), { waitUntil: 'load' });
+      await cp.waitForFunction(id => { const g = document.getElementById('graph'); return g?.getAttribute('data-focus') === id && g.getAttribute('data-scale') === 'focus' && g.getAttribute('data-anim') === '0'; }, h, { timeout: 30000 }).catch(() => {});
+      await twoFrames(cp);
+      await cp.waitForFunction(() => document.getElementById('graph').getAttribute('data-anim') === '0', null, { timeout: 5000 }).catch(() => {});
+      return focusState(cp);
+    };
+    const collapse = await cp.evaluate(() => { const kb = JSON.parse(document.getElementById('boot')?.textContent || '{}').kb || 'kb'; return JSON.parse(localStorage.getItem('okt:' + kb) || '{}').collapse; });
+    const T = tiersOf(hub);
+    const f = await settle(hub);
+    const wantDrawn = files.filter(n => T.drawn(n.id)).length;
+    const regionCount = files.filter(n => regionKey(n.id) === T.R).length;
+    const links = files.filter(n => T.hop.get(n.id) === 1 && regionKey(n.id) !== T.R).length;
+    const wantEdges = ruleEdges(T).length;
+    check('show all off draws only the tiers',
+      collapse === 1000000 && f.focus === hub && wantDrawn === regionCount + links && f.drawn === wantDrawn && f.edges === wantEdges,
+      { collapse, focus: f.focus, drawn: f.drawn, want: wantDrawn, region: regionCount, links, edges: f.edges, wantEdges });
+    // a focus whose two hops reach another region past its own links there: the most connected
+    // such card, the hub when it is one
+    const reaches = id => { const T2 = tiersOf(id); return [...T2.hop].some(([x, h]) => h === 2 && kind[x] === 'file' && regionKey(x) !== T2.R); };
+    const hub2 = [hub, ...files.map(n => n.id).sort((a, b) => (degree[b] || 0) - (degree[a] || 0))].find(reaches);
+    if (!hub2) {
+      check('cards in other regions fold into their cluster', false, { error: 'no card reaches another region in two hops' });
+    } else {
+      const T2 = tiersOf(hub2);
+      const f2 = hub2 === hub ? f : await settle(hub2);
+      const want = {};
+      for (const n of files) if (T2.hop.get(n.id) === 1 && regionKey(n.id) !== T2.R) want[regionKey(n.id)] = (want[regionKey(n.id)] || 0) + 1;
+      const keys = new Set([...Object.keys(want), ...Object.keys(f2.regions)].filter(k => k !== T2.R));
+      const off = [...keys].filter(k => (f2.regions[k] || 0) !== (want[k] || 0)).map(k => ({ region: k, drawn: f2.regions[k] || 0, want: want[k] || 0 }));
+      const twoHop = [...T2.hop].filter(([x, h]) => h === 2 && kind[x] === 'file' && regionKey(x) !== T2.R).length;
+      check('cards in other regions fold into their cluster',
+        f2.focus === hub2 && Object.keys(want).length > 0 && twoHop > 0 && off.length === 0,
+        { hub2, focus: f2.focus, regions: Object.keys(want).length, twoHop, off: off.slice(0, 5) });
+    }
+  } finally {
+    await cctx.close();
+  }
+}
+{
+  // click a drawn tier-1 card: one in the hub's region, on the pane clear of the chrome, and the
+  // farthest from any other drawn point
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(hub)));
+  await page.evaluate(() => document.activeElement?.blur());
+  const f = await focusState();
+  const box = await page.locator('#graph').boundingBox();
+  const pos = await page.evaluate(() => window.__oktPos);
+  const T = tiersOf(hub);
+  const drawnIds = idx.nodes.map(n => n.id).filter(id => T.drawn(id) && pos[id]);
+  const scr = new Map();
+  const pr = projectAll(f.view, drawnIds.map(id => pos[id]), box.width, box.height);
+  drawnIds.forEach((id, k) => { const p = pr[k]; if (p.front) scr.set(id, [(p.nx + 1) / 2 * box.width, (1 - p.ny) / 2 * box.height]); });
+  const cands = [...scr].filter(([id, [x, y]]) => kind[id] === 'file' && T.hop.get(id) === 1 && regionKey(id) === T.R
+    && x > 90 && x < box.width - 140 && y > 60 && y < box.height - 110)
+    .map(([id, [x, y]]) => ({ id, x, y, room: Math.min(...[...scr].filter(([o]) => o !== id).map(([, [ox, oy]]) => Math.hypot(ox - x, oy - y))) }))
+    .sort((a, b) => b.room - a.room);
+  const c = cands[0];
+  if (!c) {
+    check('a graph click eases the camera to the card', false, { error: 'no tier-1 card on the pane', drawn: drawnIds.length });
+  } else {
+    const i = await tlLen();
+    await waits(() => page.mouse.click(box.x + c.x, box.y + c.y));
+    const tl = await tlFrom(i);
+    const after = await focusState();
+    const e = { theta: eased(tl, 'data-theta'), dist: eased(tl, 'data-dist') };
+    check('a graph click eases the camera to the card',
+      after.focus === c.id && after.scale === 'focus' && Object.values(e).some(x => x.mid >= 3 && x.span >= 100),
+      { card: c.id, room: +c.room.toFixed(1), focus: after.focus, ...e });
+  }
 }
 
 // ---- LAYOUT ---------------------------------------------------------------------------------

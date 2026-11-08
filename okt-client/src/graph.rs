@@ -10,8 +10,13 @@
 //! regions sit on a rim inside the pane's edge, in their true direction, with the bundles that
 //! reach them. Focus scale is a card and its links. A selection sets the scale (a folder brings
 //! its region to system scale, a card focus, nothing the galaxy); zooming crosses to the
-//! neighbouring scale and never changes the selection. Which cards are drawn (`vis`) is decided
-//! apart from the scale: the selection's region, or every card and link under "show all".
+//! neighbouring scale and never changes the selection. Selecting a card turns the camera to look
+//! along the smallest principal axis of the card and its links in its region, fitted to the pane;
+//! its links in other regions run out to their regions' glyphs on the rim (portals).
+//!
+//! Which cards are drawn (`vis`) is decided apart from the scale, by link hops from the focus:
+//! the focus and its links in any region, two hops dim and the rest of its region faint, nothing
+//! else but the region glyphs; or every card and link under "show all".
 //!
 //! Frames are drawn on demand. Input handlers never draw: every camera move goes through
 //! `cam_to`, which starts an ease (or cuts, under reduced motion) and schedules a frame. The frame
@@ -42,16 +47,21 @@ use cam::{Pane, Pose, Scale};
 
 /// A card's world radius before its links add to it (the layout spaces cards 10 apart).
 const CARD_R: f64 = 2.2;
+/// However close the camera comes, a point is drawn no larger than this, in CSS px: a tight
+/// focus set fitted to the pane shows its arrangement, not a few giant discs.
+const POINT_MAX_PX: f64 = 22.0;
 /// The first view: a little to the side and above, so depth reads from the start.
 const THETA0: f64 = -30.0 * PI / 180.0;
 const PSI0: f64 = 20.0 * PI / 180.0;
 /// One orbit key press turns the azimuth this far, one tilt key press the elevation.
 pub const ORBIT_DEG: f64 = 15.0;
 pub const TILT_DEG: f64 = 10.0;
-/// A selected card is approached to at least the distance that fits this radius around it.
+/// The scale bands take a card's own approach as fitting this radius around it.
 const FOCUS_RADIUS: f64 = 120.0;
-/// Room around fitted cards for their marks, in world units.
+/// Room around a fitted region's nodes for their marks, in world units.
 const FIT_PAD: f64 = 12.0;
+/// Room around a focus fit's cards: a card's radius (the flat labels find their own room).
+const FOCUS_PAD: f64 = CARD_R;
 /// A region glyph's halo: this world radius plus this much per square root of its cards.
 const GLYPH_R0: f64 = 14.0;
 const GLYPH_K: f64 = 6.0;
@@ -230,8 +240,10 @@ fn vis_of(idx: &Idx, n: &Node) -> NodeVis {
         "dir" => (Kind::Dir, CARD_R * (1.4 + 0.3 * (1.0 + files).ln())),
         _ => {
             let index = n.id == "index.md" || n.id.ends_with("/index.md");
-            let r = CARD_R * (1.0 + 0.35 * (1.0 + idx.degree(&n.id)).ln());
-            (Kind::File, if index { r * 1.4 } else { r })
+            (
+                Kind::File,
+                CARD_R * vis::importance(idx.degree(&n.id), index),
+            )
         }
     };
     NodeVis {
@@ -257,6 +269,11 @@ struct Colors {
     accent_css: String,
     /// a region halo's peak alpha (`--graph-glyph-alpha`)
     glyph_alpha: f32,
+    /// how much of a card two hops out shows, and of the rest of the focused region
+    /// (`--graph-t2-alpha`, `--graph-t3-alpha`)
+    tier_alpha: (f32, f32),
+    /// the compass's ink and its far side, as CSS (`--graph-compass`, `--graph-compass-far`)
+    compass: (String, String),
     /// how far inside the pane's edge the rim runs, CSS px (`--graph-rim-inset`)
     rim_inset: f64,
     /// a dark background: halos add light rather than cover
@@ -302,6 +319,11 @@ impl Colors {
             fam,
             accent_css: v("--accent"),
             glyph_alpha: number("--graph-glyph-alpha", 0.3) as f32,
+            tier_alpha: (
+                number("--graph-t2-alpha", 0.55) as f32,
+                number("--graph-t3-alpha", 0.22) as f32,
+            ),
+            compass: (v("--graph-compass"), v("--graph-compass-far")),
             rim_inset: number("--graph-rim-inset", 34.0),
         }
     }
@@ -355,10 +377,22 @@ struct Bundle {
     alpha: f32,
 }
 
-/// What a resize re-fits while `autofit` holds: the whole graph, or a set of points.
+/// What a resize re-fits while `autofit` holds: the whole graph, or a set of points with the
+/// room kept around them.
 enum Fit {
     Galaxy,
-    Points(Vec<cam::V3>),
+    Points(Vec<cam::V3>, f64),
+}
+
+/// A focus link in a region out of focus: its edge runs from the focus to the card when the card
+/// is on the pane, otherwise to its region's glyph on the rim.
+struct Portal {
+    from: usize,
+    to: usize,
+    region: usize,
+    rgba: [f32; 4],
+    /// CSS px
+    w: f32,
 }
 
 struct Drag {
@@ -400,6 +434,14 @@ pub struct G {
     inst: Rc<gl::Instances>,
     /// the nodes drawn as points, decided when the selection, scale or show all changes
     drawn: Rc<Vec<u32>>,
+    /// for each node under a collapsed folder, that folder (its tier-3 cards fold into it)
+    fold: Vec<Option<usize>>,
+    /// a selected folder's own children: tier 1 with the folder's links
+    kids: Vec<usize>,
+    /// the focus links drawn out to the rim, decided with `drawn`
+    portals: Vec<Portal>,
+    /// the cards the last card solve fitted, for `data-focus-ids`
+    focus_ids: Rc<Vec<String>>,
     /// the active region's subfolders, drawn as glyphs
     subs: Vec<usize>,
     show_all: bool,
@@ -429,9 +471,9 @@ pub struct G {
     h: f64,
     dpr: f64,
     host_rect: (f64, f64, f64, f64),
-    /// the pane chrome the rim keeps clear of: the toolbar's right edge and the legend's height,
-    /// CSS px from the pane's left and bottom edges
-    chrome: (f64, f64),
+    /// the pane chrome the rim and the compass keep clear of: the toolbar's right edge, the
+    /// legend's height and its right edge, CSS px from the pane's left, bottom and left edges
+    chrome: (f64, f64, f64),
     raf: i32,
     drag: Option<Drag>,
     built: bool,
@@ -531,6 +573,43 @@ impl G {
         let d = cam::fit_distance(&pts, target, theta, psi, self.pane(), FIT_PAD, self.d_min());
         (target, d, pts)
     }
+    /// The camera for a selected card: the card as the target, looking along the smallest
+    /// principal axis of the card and its links in its own region (from the side the camera is
+    /// on), at the distance that fits them to the pane. Its links in other regions are left to
+    /// their portals on the rim. Also the points fitted and their ids.
+    fn card_view(&self, i: usize) -> (Pose, Vec<cam::V3>, Vec<String>) {
+        let r = self.vis.region.get(i).copied();
+        let mut set = vec![i];
+        if let Some(adj) = self.vis.adj.get(i) {
+            set.extend(adj.iter().copied().filter(|&j| {
+                j != i
+                    && self.vis.region.get(j).copied() == r
+                    && self.nodes.get(j).is_some_and(|v| v.kind != Kind::Root)
+            }));
+        }
+        let pts: Vec<cam::V3> = set.iter().map(|&j| self.space.pos[j]).collect();
+        let ids = set.iter().map(|&j| self.ids[j].clone()).collect();
+        let dest = self.dest();
+        let dir = cam::solve_view(&pts, cam::basis(dest.theta, dest.psi).dir);
+        let (theta, psi) = cam::angles(dir, dest.theta);
+        let target = self.space.pos[i];
+        let d = cam::fit_distance(
+            &pts,
+            target,
+            theta,
+            psi,
+            self.pane(),
+            FOCUS_PAD,
+            self.d_min(),
+        );
+        let to = Pose {
+            target,
+            theta,
+            psi,
+            ln_d: d.ln(),
+        };
+        (to, pts, ids)
+    }
     /// Set the scale and the active region; true when either changed.
     fn set_scale(&mut self, scale: Scale, region: Option<usize>) -> bool {
         let changed = self.scale != scale || self.region != region;
@@ -547,12 +626,13 @@ thread_local! {
         nodes: vec![], edges: vec![], vis: Rc::new(vis::Vis::default()), region_node: vec![],
         n_surf: 0, bundles: vec![], bundle_pts: vec![], colors: None,
         inst: Rc::new(gl::Instances::default()), drawn: Rc::new(vec![]), subs: vec![],
+        fold: vec![], kids: vec![], portals: vec![], focus_ids: Rc::new(vec![]),
         show_all: false, scale: Scale::Galaxy, region: None, rim: 0.0, sel_id: None,
         inst_dirty: false, sel: None,
         pose: Pose { target: [0.0; 3], theta: THETA0, psi: PSI0, ln_d: 8.0 },
         anim: None, autofit: true, fit: Fit::Galaxy, moves: 0, picks: vec![], hover: None,
         cursor: None, flash: vec![], w: 0.0, h: 0.0, dpr: 1.0, host_rect: (0.0, 0.0, 0.0, 0.0),
-        chrome: (0.0, 0.0),
+        chrome: (0.0, 0.0, 0.0),
         raf: 0, drag: None, built: false,
     })));
 }
@@ -620,6 +700,16 @@ pub fn build(flash: &[String]) {
     let region_node: Vec<Option<usize>> = vis.regions.iter().map(|k| at.get(k).copied()).collect();
     let n_surf = idx.nodes.iter().filter(|n| n.t == "surface").count();
     let (bundles, bundle_pts) = tessellate(&vis, &sp, ids.len());
+    // the collapsed folder each node folds into, if any
+    let fold: Vec<Option<usize>> = ids
+        .iter()
+        .map(|id| {
+            let r = lay.rep_or(id);
+            (r != id && is_collapsed(&idx, r))
+                .then(|| at.get(r).copied())
+                .flatten()
+        })
+        .collect();
     let now = dom::perf_now();
     let flashed: Vec<(usize, f64)> = flash
         .iter()
@@ -642,6 +732,7 @@ pub fn build(flash: &[String]) {
         gs.edges = edges;
         gs.vis = vis;
         gs.region_node = region_node;
+        gs.fold = fold;
         gs.n_surf = n_surf;
         gs.bundles = bundles;
         gs.bundle_pts = bundle_pts;
@@ -680,10 +771,11 @@ pub fn build(flash: &[String]) {
 }
 
 /// How far the toolbar reaches in from the pane's left edge, and the legend up from its bottom
-/// (zero for either when it is not shown), so rim glyphs keep clear of them.
-fn chrome_insets() -> (f64, f64) {
+/// and in from its left edge (zero for any when it is not shown), so rim glyphs and the compass
+/// keep clear of them.
+fn chrome_insets() -> (f64, f64, f64) {
     let Some(host) = dom::try_id("v-graph") else {
-        return (0.0, 0.0);
+        return (0.0, 0.0, 0.0);
     };
     let hr = host.get_bounding_client_rect();
     let left = dom::q(".gtools")
@@ -691,12 +783,18 @@ fn chrome_insets() -> (f64, f64) {
         .filter(|r| r.width() > 0.0)
         .map(|r| r.right() - hr.left())
         .unwrap_or(0.0);
-    let bottom = dom::try_id("glegend")
+    let legend = dom::try_id("glegend")
         .map(|l| l.get_bounding_client_rect())
-        .filter(|r| r.width() > 0.0)
+        .filter(|r| r.width() > 0.0);
+    let bottom = legend
+        .as_ref()
         .map(|r| hr.bottom() - r.top())
         .unwrap_or(0.0);
-    (left.max(0.0), bottom.max(0.0))
+    let right = legend
+        .as_ref()
+        .map(|r| r.right() - hr.left())
+        .unwrap_or(0.0);
+    (left.max(0.0), bottom.max(0.0), right.max(0.0))
 }
 
 /// Publish the 3D layout for tests: `#graph[data-layout]` (its fingerprint) and
@@ -747,23 +845,70 @@ fn tessellate(vis: &vis::Vis, sp: &space::Space, first: usize) -> (Vec<Bundle>, 
     (bundles, pts)
 }
 
-/// What is drawn, decided when the selection, the scale or show all changes (never per frame):
-/// - show all: every card and every link edge, the selection's own on top;
-/// - otherwise the selection's region (its cards and folders), the active region's subfolders
-///   at system and focus scale, and the selection's links whose other end is drawn too;
-/// - the bundles between regions, unless show all.
-///
-/// Returns what the GL uploads, the nodes drawn as points, and the active region's subfolders.
-fn instances(gs: &G) -> (gl::Instances, Vec<u32>, Vec<usize>) {
+/// What one change of the tiers hands the GL.
+struct Tiered {
+    inst: gl::Instances,
+    /// the nodes drawn as points
+    drawn: Vec<u32>,
+    /// the active region's subfolders, drawn as glyphs
+    subs: Vec<usize>,
+    portals: Vec<Portal>,
+}
+
+/// Where a node's tier rides: its colour texel's fourth channel holds `style + TIER_K·tier`, with
+/// tier 4 for a node that is not drawn, so the hooks count tiers from what was uploaded.
+const TIER_K: f32 = 8.0;
+
+/// A node's tier code as uploaded (0–3 drawn, 4 not), from its colour texel's fourth channel.
+fn tier_code(packed: f32) -> usize {
+    ((packed + 0.5) / TIER_K).floor() as usize
+}
+
+/// What is drawn, decided when the selection, the scale or show all changes (never per frame).
+/// The tiers decide (`vis::tiers`): the focus and its links in any region, two hops and the rest
+/// of the focused region inside it, collapsed folders standing for their tier-3 cards, or every
+/// card under show all. With nothing selected, the active region's folders are drawn at system
+/// scale. The edges are those the tier rule draws (`vis::edge_kind`): the focus's own in the
+/// accent (out) or `--edge-hot` (in), between its links faint, out to two hops dim; its links in
+/// regions out of focus are kept apart as portals, drawn per frame. The bundles between regions
+/// are uploaded unless show all.
+fn instances(gs: &G) -> Tiered {
     let grey = [0.55, 0.55, 0.55, 1.0];
-    let (accent, halo, edge, edge_hot, bundle) = gs
+    let (accent, halo, edge, edge_hot, bundle, (t2a, _)) = gs
         .colors
         .as_ref()
-        .map(|c| (c.accent, c.halo, c.edge, c.edge_hot, c.bundle))
-        .unwrap_or((grey, grey, [0.5, 0.5, 0.5, 0.2], [0.8, 0.8, 0.8, 0.6], grey));
+        .map(|c| (c.accent, c.halo, c.edge, c.edge_hot, c.bundle, c.tier_alpha))
+        .unwrap_or((
+            grey,
+            grey,
+            [0.5, 0.5, 0.5, 0.2],
+            [0.8, 0.8, 0.8, 0.6],
+            grey,
+            (0.55, 0.22),
+        ));
     let n = gs.nodes.len();
     let sel = gs.sel;
-    let rf = sel.and_then(|i| gs.vis.region.get(i).copied());
+    let centre: Vec<usize> = sel.into_iter().collect();
+    let regions: Vec<usize> = sel
+        .and_then(|i| gs.vis.region.get(i).copied())
+        .into_iter()
+        .collect();
+    let kids: &[usize] = if sel.is_some_and(|i| gs.nodes[i].kind == Kind::Dir) {
+        &gs.kids
+    } else {
+        &[]
+    };
+    let folder: Vec<bool> = gs
+        .nodes
+        .iter()
+        .map(|v| matches!(v.kind, Kind::Dir | Kind::Root))
+        .collect();
+    let focus = vis::Focus {
+        centre: &centre,
+        kids,
+        regions: &regions,
+    };
+    let tier = vis::tiers(&gs.vis, &focus, &folder, &gs.fold, gs.show_all);
     let active = if gs.scale == Scale::Galaxy {
         None
     } else {
@@ -774,10 +919,8 @@ fn instances(gs: &G) -> (gl::Instances, Vec<u32>, Vec<usize>) {
             let k = gs.nodes[i].kind;
             let r = gs.vis.region.get(i).copied();
             k != Kind::Root
-                && (gs.show_all
-                    || r == rf
-                    || (k == Kind::Dir && r.is_some() && r == active)
-                    || Some(i) == sel)
+                && (tier[i] != vis::HIDDEN
+                    || (sel.is_none() && k == Kind::Dir && r.is_some() && r == active))
         })
         .collect();
     let drawn: Vec<u32> = (0..n).filter(|&i| on[i]).map(|i| i as u32).collect();
@@ -815,29 +958,52 @@ fn instances(gs: &G) -> (gl::Instances, Vec<u32>, Vec<usize>) {
                 Kind::File => (fam, gl::style::DISC),
             }
         };
-        inst.col.extend([rgb[0], rgb[1], rgb[2], st]);
+        let code = if !on[i] { 4 } else { tier[i].min(3) };
+        inst.col
+            .extend([rgb[0], rgb[1], rgb[2], st + TIER_K * code as f32]);
     }
     for p in &gs.bundle_pts {
         inst.pos
             .extend([p[0] as f32, p[1] as f32, p[2] as f32, 0.0]);
-        inst.col.extend([0.0; 4]);
+        inst.col.extend([0.0, 0.0, 0.0, TIER_K * 4.0]);
     }
     let link = gl::group::LINK;
     let mut hot: Vec<(u32, u32, [f32; 4], f32)> = Vec::new();
+    let mut portals = Vec::new();
     for &(s, t, surface) in &gs.edges {
         let (si, ti) = (s as usize, t as usize);
-        let touches = Some(si) == sel || Some(ti) == sel;
-        if !gs.show_all && !(touches && on[si] && on[ti]) {
+        if !gs.show_all && !(on[si] && on[ti]) {
             continue;
         }
-        if Some(si) == sel {
-            hot.push((s, t, [accent[0], accent[1], accent[2], 0.95], 1.6));
-        } else if Some(ti) == sel {
-            hot.push((s, t, edge_hot, 1.4));
-        } else {
-            let a = if surface { edge[3] * 0.6 } else { edge[3] };
-            inst.ends.extend([s, t]);
-            inst.ecol.extend([edge[0], edge[1], edge[2], a, 1.0, link]);
+        let Some(kind) = vis::edge_kind(&gs.vis, &tier, &regions, si, ti, gs.show_all) else {
+            continue;
+        };
+        let (out, inn) = (Some(si) == sel, Some(ti) == sel);
+        let a = if surface { edge[3] * 0.6 } else { edge[3] };
+        let (c, w) = match kind {
+            _ if out => ([accent[0], accent[1], accent[2], 0.95], 1.6),
+            _ if inn => (edge_hot, 1.4),
+            vis::EdgeKind::Hot | vis::EdgeKind::Portal => (edge_hot, 1.4),
+            vis::EdgeKind::Faint => ([edge[0], edge[1], edge[2], a * 0.8], 1.0),
+            vis::EdgeKind::Dim => ([edge[0], edge[1], edge[2], a * t2a], 1.0),
+            vis::EdgeKind::Plain => ([edge[0], edge[1], edge[2], a], 1.0),
+        };
+        match kind {
+            vis::EdgeKind::Portal => {
+                let (from, to) = if out { (si, ti) } else { (ti, si) };
+                portals.push(Portal {
+                    from,
+                    to,
+                    region: gs.vis.region[to],
+                    rgba: c,
+                    w,
+                });
+            }
+            _ if out || inn => hot.push((s, t, c, w)),
+            _ => {
+                inst.ends.extend([s, t]);
+                inst.ecol.extend([c[0], c[1], c[2], c[3], w, link]);
+            }
         }
     }
     for (s, t, c, w) in hot {
@@ -861,7 +1027,12 @@ fn instances(gs: &G) -> (gl::Instances, Vec<u32>, Vec<usize>) {
         }
         inst.n_bundles = gs.bundles.len();
     }
-    (inst, drawn, subs)
+    Tiered {
+        inst,
+        drawn,
+        subs,
+        portals,
+    }
 }
 
 /// Hand the current instances to the GL, and to `window.__oktPos` when a test asked for them.
@@ -1078,11 +1249,11 @@ fn zoom(dl: f64, keyed: bool) {
             Scale::Focus => gs.sel.map(|i| {
                 let r = gs.region_of(i);
                 gs.set_scale(Scale::Focus, r);
+                let (to, _, _) = gs.card_view(i);
                 (
                     Pose {
-                        target: gs.space.pos[i],
-                        ln_d: ln_d.min(gs.d_focus().ln()),
-                        ..base
+                        ln_d: ln_d.min(to.ln_d),
+                        ..to
                     },
                     Move::Ease(cam::EASE_MS),
                 )
@@ -1122,37 +1293,43 @@ pub fn orbit_by(d_theta: f64, d_psi: f64) {
     cam_to(to, Move::Ease(cam::KEY_MS));
 }
 
-/// Ease the camera onto a node: at distance `d` (keeping the scale), or, for a selection
-/// (`d` is `None`), at the scale the selection sets: a card is approached close enough to see its
-/// neighbourhood (focus), a folder brings its region to system scale, the root the galaxy.
+/// Ease the camera onto a node: at distance `d`, keeping the scale and the angles, or, for a
+/// selection (`d` is `None`), at the scale the selection sets: a card is solved for (focus), a
+/// folder brings its region to system scale, the root the galaxy.
 pub fn focus_node(id: &str, d: Option<f64>) {
-    if d.is_none() {
-        if id == "." {
-            fit();
-            return;
+    let Some(d) = d else {
+        match id {
+            "." => fit(),
+            _ if state::idx().is_some_and(|x| x.is_dir(id)) => frame_region(id),
+            _ => frame_card(id),
         }
-        if state::idx().is_some_and(|x| x.is_dir(id)) {
-            frame_region(id);
-            return;
+        return;
+    };
+    let to = {
+        let mut gs = g();
+        let Some(&i) = gs.at.get(id) else { return };
+        gs.autofit = false;
+        Pose {
+            target: gs.space.pos[i],
+            ln_d: d.ln(),
+            ..gs.dest()
         }
-    }
+    };
+    cam_to(to, Move::Ease(cam::EASE_MS));
+}
+
+/// A card is selected: focus scale, the camera turned and fitted to the card and its links in its
+/// region (`card_view`), eased while the graph is shown and cut while it is hidden.
+fn frame_card(id: &str) {
     let (to, rescaled) = {
         let mut gs = g();
         let Some(&i) = gs.at.get(id) else { return };
-        let target = gs.space.pos[i];
-        let dest = gs.dest();
-        let near = gs.d_focus().ln();
-        gs.autofit = false;
-        let rescaled = d.is_none() && {
-            let r = gs.region_of(i);
-            gs.set_scale(Scale::Focus, r)
-        };
-        let to = Pose {
-            target,
-            ln_d: d.map(f64::ln).unwrap_or(dest.ln_d.min(near)),
-            ..dest
-        };
-        (to, rescaled)
+        let (to, pts, ids) = gs.card_view(i);
+        gs.autofit = true;
+        gs.fit = Fit::Points(pts, FOCUS_PAD);
+        gs.focus_ids = Rc::new(ids);
+        let r = gs.region_of(i);
+        (to, gs.set_scale(Scale::Focus, r))
     };
     cam_to(to, Move::Ease(cam::EASE_MS));
     if rescaled {
@@ -1170,7 +1347,7 @@ fn frame_region(id: &str) {
             let dest = gs.dest();
             let (target, d, pts) = gs.region_fit(r, dest.theta, dest.psi);
             gs.autofit = true;
-            gs.fit = Fit::Points(pts);
+            gs.fit = Fit::Points(pts, FIT_PAD);
             let rescaled = gs.set_scale(Scale::System, Some(r));
             (
                 Pose {
@@ -1196,17 +1373,22 @@ fn frame_region(id: &str) {
 // ---- selection -----------------------------------------------------------------------------
 
 /// `updateGraph()`: the selection changed (or what is drawn did): the camera follows a new
-/// selection to the scale it sets (a folder's region at system scale, no selection the galaxy;
-/// a card's own move comes from `focus_node`), then new instances and the hint.
+/// selection, from any source, to the scale it sets (a card solved for at focus scale, a folder's
+/// region at system scale, no selection the galaxy), then new instances and the hint.
 pub fn update() {
     let Some(idx) = state::idx() else { return };
     let sel = state::sel();
+    let kids: Vec<String> = match sel.as_deref() {
+        Some(s) if s != "." && idx.is_dir(s) => idx.kids_of(s).to_vec(),
+        _ => Vec::new(),
+    };
     let moved = {
         let mut gs = g();
         if !gs.built {
             return;
         }
         gs.sel = sel.as_deref().and_then(|s| gs.at.get(s).copied());
+        gs.kids = kids.iter().filter_map(|k| gs.at.get(k).copied()).collect();
         let moved = gs.sel_id != sel;
         gs.sel_id = sel.clone();
         moved
@@ -1215,7 +1397,7 @@ pub fn update() {
         match sel.as_deref() {
             None | Some(".") => fit(),
             Some(s) if idx.is_dir(s) => frame_region(s),
-            _ => {}
+            Some(s) => frame_card(s),
         }
     }
     retier();
@@ -1243,10 +1425,11 @@ fn retier() {
             return;
         }
         gs.show_all = show_all;
-        let (inst, drawn, subs) = instances(&gs);
-        gs.inst = Rc::new(inst);
-        gs.drawn = Rc::new(drawn);
-        gs.subs = subs;
+        let t = instances(&gs);
+        gs.inst = Rc::new(t.inst);
+        gs.drawn = Rc::new(t.drawn);
+        gs.subs = t.subs;
+        gs.portals = t.portals;
     }
     sync_instances();
     schedule();
@@ -1336,6 +1519,8 @@ struct Glyphs {
     rim_bundles: usize,
     /// view depths of the glyphs in front of the camera
     depths: Vec<f64>,
+    /// where each region's glyph was drawn, in pane CSS px (portals run out to it)
+    at: Vec<Option<[f64; 2]>>,
 }
 
 fn rgba(c: [f32; 4], a: f64) -> [f32; 4] {
@@ -1537,6 +1722,7 @@ fn glyphs(gs: &G, pose: &Pose, pane: Pane, unit: f64) -> Glyphs {
             }
         }
     }
+    out.at = at;
     out
 }
 
@@ -1568,44 +1754,114 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, Vec<overlay::Pla
     let unit = cam::px_per_unit(pane);
     let drawn = gs.drawn.clone();
     let mut items: Vec<(f64, u32, f64, f64)> = Vec::with_capacity(drawn.len());
+    // points behind the camera are drawn too (the GL drops them), first, so the draw list is the
+    // whole tier set wherever the camera is
+    let mut behind: Vec<u32> = Vec::new();
     for &i in drawn.iter() {
-        if let Some([x, y, s]) = cam::project(gs.space.pos[i as usize], &pose, pane) {
-            items.push((s, i, x, y));
+        match cam::project(gs.space.pos[i as usize], &pose, pane) {
+            Some([x, y, s]) => items.push((s, i, x, y)),
+            None => behind.push(i),
         }
     }
     items.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
-    let gly = glyphs(gs, &pose, pane, unit);
+    let mut gly = glyphs(gs, &pose, pane, unit);
     let (near, far) = items
         .iter()
         .map(|it| it.0)
         .chain(gly.depths.iter().copied())
         .fold((f64::MAX, 0.0f64), |(n, f), s| (n.min(s), f.max(s)));
     let (near, far) = if near > far { (1.0, 2.0) } else { (near, far) };
-    let order: Vec<u32> = items.iter().map(|it| it.1).collect();
-    let cards = items
+    let order: Vec<u32> = behind
         .iter()
-        .filter(|it| gs.nodes[it.1 as usize].kind == Kind::File)
+        .copied()
+        .chain(items.iter().map(|it| it.1))
+        .collect();
+    // the cards in the draw list: by tier (as uploaded) and by region
+    let mut tiers = [0usize; 4];
+    let mut by_region: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for &i in &order {
+        let i = i as usize;
+        if gs.nodes[i].kind != Kind::File {
+            continue;
+        }
+        if let Some(t) = gs
+            .inst
+            .col
+            .get(i * 4 + 3)
+            .and_then(|c| tiers.get_mut(tier_code(*c)))
+        {
+            *t += 1;
+        }
+        if let Some(k) = gs.vis.region.get(i).and_then(|&r| gs.vis.regions.get(r)) {
+            *by_region.entry(k.as_str()).or_insert(0) += 1;
+        }
+    }
+    let cards = tiers.iter().sum::<usize>();
+    let focus_n = gs
+        .inst
+        .col
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .take(gs.nodes.len())
+        .filter(|c| tier_code(c[3]) <= 1)
         .count();
+    // the focus's halo: a soft glow around its point, light added on a dark background
+    if let (Some(c), Some(&(s, _, x, y))) = (
+        gs.colors.as_ref(),
+        gs.sel
+            .and_then(|i| items.iter().find(|it| it.1 as usize == i)),
+    ) {
+        let rpx = (gs.sel.map(|i| gs.nodes[i].r).unwrap_or(CARD_R) * unit / s).min(POINT_MAX_PX);
+        gly.halos.push(mark(
+            [x, y],
+            (rpx * 3.0).max(14.0),
+            gl::mark::HALO,
+            rgba(c.halo, 0.32),
+        ));
+    }
+    // portals: from the focus to the card when it is on the pane, else to its region's glyph
+    let mut n_portals = 0;
+    for p in &gs.portals {
+        let Some([fx, fy, _]) = cam::project(gs.space.pos[p.from], &pose, pane) else {
+            continue;
+        };
+        let to = cam::project(gs.space.pos[p.to], &pose, pane)
+            .filter(|q| q[0] >= 0.0 && q[1] >= 0.0 && q[0] <= pane.w && q[1] <= pane.h)
+            .map(|q| [q[0], q[1]])
+            .or_else(|| gly.at.get(p.region).copied().flatten());
+        if let Some(to) = to {
+            gly.under.push(gl::Mark {
+                a: [fx as f32, fy as f32],
+                b: [to[0] as f32, to[1] as f32],
+                r: p.w * 0.5,
+                style: gl::mark::DISC,
+                rgba: p.rgba,
+            });
+            n_portals += 1;
+        }
+    }
     let mut picks: Vec<Pick> = items
         .iter()
         .rev()
         .map(|&(s, i, x, y)| Pick {
             x,
             y,
-            r: (gs.nodes[i as usize].r * unit / s).max(1.6),
+            r: (gs.nodes[i as usize].r * unit / s).clamp(1.6, POINT_MAX_PX),
             i: i as usize,
         })
         .collect();
     picks.extend(gly.picks);
-    let (bg, fog, accent_css, additive) = gs
+    let (bg, fog, accent_css, additive, tier_alpha) = gs
         .colors
         .as_ref()
-        .map(|c| (c.bg, c.fog, c.accent_css.clone(), c.dark))
+        .map(|c| (c.bg, c.fog, c.accent_css.clone(), c.dark, c.tier_alpha))
         .unwrap_or((
             [0.0, 0.0, 0.0, 1.0],
             [0.0, 0.0, 0.0, 1.0],
             "#ffa028".into(),
             true,
+            (0.55, 0.22),
         ));
     let vp = cam::view_proj(&pose, pane, gs.space.radius).map(|v| v as f32);
     let fade = if gs.show_all {
@@ -1624,6 +1880,8 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, Vec<overlay::Pla
             bg,
             fog,
             bundle_fade: fade,
+            tier_alpha,
+            r_max: POINT_MAX_PX as f32,
             under: &gly.under,
             halos: &gly.halos,
             marks: &gly.marks,
@@ -1670,8 +1928,39 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, Vec<overlay::Pla
     let mut names = gly.names;
     names.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.text.cmp(&b.1.text)));
     let names: Vec<overlay::Name> = names.into_iter().map(|(_, n)| n).collect();
+    // the compass: the galaxy's axes and horizon as the camera sees them, the focused region's
+    // direction, and the scale
+    let b = cam::basis(pose.theta, pose.psi);
+    let compass = gs.colors.as_ref().map(|c| overlay::Compass {
+        r: b.r,
+        u: b.u,
+        dir: b.dir,
+        region: gs
+            .region
+            .filter(|_| gs.scale != Scale::Galaxy)
+            .and_then(|r| gs.space.regions.get(r))
+            .map(|g| g.core),
+        scale: gs.scale.name(),
+        // above the legend when the legend reaches under the compass
+        lift: if gs.chrome.2 > gs.w - overlay::COMPASS_INSET - overlay::COMPASS_PX - 4.0 {
+            gs.chrome.1
+        } else {
+            0.0
+        },
+        ink: c.compass.0.clone(),
+        far: c.compass.1.clone(),
+        accent: accent_css.clone(),
+    });
     let labels = match &gs.ov {
-        Some(ov) => ov.draw(gs.w, gs.h, gs.dpr, &accent_css, &rings, &names),
+        Some(ov) => ov.draw(
+            gs.w,
+            gs.h,
+            gs.dpr,
+            &accent_css,
+            &rings,
+            &names,
+            compass.as_ref(),
+        ),
         None => Vec::new(),
     };
     gs.picks = picks;
@@ -1697,10 +1986,14 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, Vec<overlay::Pla
         anim: gs.anim.is_some(),
         vp,
         cards,
-        edges,
+        edges: edges + n_portals,
         pos_hash: gs.gl.as_ref().map(|r| r.pos_hash()).unwrap_or(0),
         dist_galaxy: gs.d_galaxy(),
         focus: gs.sel.map(|i| gs.ids[i].clone()).unwrap_or_default(),
+        focus_n,
+        focus_ids: serde_json::to_string(&*gs.focus_ids).unwrap_or_default(),
+        tiers,
+        drawn_regions: serde_json::to_string(&by_region).unwrap_or_default(),
     };
     Some((drawn, uploaded, labels))
 }
@@ -1880,7 +2173,7 @@ pub fn frame_selection() {
             gs.d_min(),
         );
         gs.autofit = true;
-        gs.fit = Fit::Points(pts);
+        gs.fit = Fit::Points(pts, FIT_PAD);
         let to = Pose {
             target,
             ln_d: d.ln(),
@@ -2044,15 +2337,9 @@ fn resize() {
             let p = gs.pose;
             let d = match &gs.fit {
                 Fit::Galaxy => gs.d_galaxy(),
-                Fit::Points(pts) => cam::fit_distance(
-                    pts,
-                    p.target,
-                    p.theta,
-                    p.psi,
-                    gs.pane(),
-                    FIT_PAD,
-                    gs.d_min(),
-                ),
+                Fit::Points(pts, pad) => {
+                    cam::fit_distance(pts, p.target, p.theta, p.psi, gs.pane(), *pad, gs.d_min())
+                }
             };
             Some(Pose { ln_d: d.ln(), ..p })
         } else {

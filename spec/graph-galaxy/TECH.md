@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feat/graph-galaxy
 base: main
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-08'
 phases:
 - id: P1
@@ -46,7 +46,7 @@ phases:
   verify: sh spec/graph-galaxy/verify/gate.sh P3
 - id: P4
   name: Focus scale and visibility tiers
-  status: pending
+  status: done
   satisfies:
   - R3
   - R8
@@ -55,6 +55,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: sh spec/graph-galaxy/verify/gate.sh P4
 - id: P5
   name: Flat label overlay and compass
@@ -435,7 +436,7 @@ depth cues, under a spherical camera.
 - Only the tiers are drawn: the focus haloed, depth cues on, portals reaching the rim.
 - The compass shows where the camera is.
 
-- [ ] `graph/vis.rs`: BFS tiers (folders terminal; the rule of PLAN § 2.5, including no tier 3 for a
+- [x] `graph/vis.rs`: BFS tiers (folders terminal; the rule of PLAN § 2.5, including no tier 3 for a
       multi-region focus, row D6), the edge selection, importance, and collapse folding tier 3 only
       (row D12). Tests:
   - `hidden_two_hop_other_region`.
@@ -444,14 +445,14 @@ depth cues, under a spherical camera.
   - `no_tier3_multi_region`.
   - `edge_rule`: no tier-2/2 or tier-3 edges, and portals to the rim.
   - `show_all_hides_nothing`.
-- [ ] `graph/cam.rs`: `solve_view` and `fit_distance`. Tests:
+- [x] `graph/cam.rs`: `solve_view` and `fit_distance`. Tests:
   - `solve_view_exact_axis`: an anisotropic set returns e₀ within 1e-9, sign toward the view.
   - `solve_view_degenerate`: isotropic keeps the view; two points; collinear; coplanar normal;
     coincident; and λ = (1, 1.5, 7.5) is **not** degenerate.
   - `angles_round_trip`: includes the pole clamp.
   - `fit_fills_seventy_percent`: max |ndc| = 0.70 ± 1e-9 at aspects 0.5, 1 and 2.5; a near point
     raises d; a single point gives `d_min`.
-- [ ] `graph.rs`:
+- [x] `graph.rs`:
   - **Card selection:** `nav::select` triggers the R3 solve via `cam_to(Ease)`. The fit input is the
     focus-set members in the selection's region; members in other regions are drawn as rim portals
     (amended R3). It eases while the graph is visible and cuts while it is hidden; the
@@ -461,10 +462,43 @@ depth cues, under a spherical camera.
   - **Look:** a static focus halo (additive on dark backgrounds only); depth cues (saturation,
     alpha, an aerial fade toward `--graph-bg`); size by degree.
   - **Hooks:** `data-focus`, `data-focus-n`, `data-focus-ids`, `data-tiers`, `data-drawn-regions`.
-- [ ] `graph/overlay.rs`: the compass, bottom-right (axes, horizon ring, focused-region dot, scale
+- [x] `graph/overlay.rs`: the compass, bottom-right (axes, horizon ring, focused-region dot, scale
       word).
-- [ ] `app.css`: `--graph-halo`, `--graph-fog`, `--graph-t2-alpha`, `--graph-t3-alpha`, compass rules.
-- [ ] `tests/ui/keys.mjs`: the P4 rows.
+- [x] `app.css`: `--graph-halo`, `--graph-fog`, `--graph-t2-alpha`, `--graph-t3-alpha`, compass rules.
+- [x] `tests/ui/keys.mjs`: the P4 rows.
+- *Amended in build (2026-11-08):*
+  - **Selection moves:** `update()` runs the card solve for a selection from any source (a graph
+    click, `nav::select`, `apply_hash`), as it already ran the folder and empty fits, so both
+    `focus_node(i, None)` calls in `nav.rs` go: `select`'s guarded one and `apply_hash`'s
+    duplicate. `focus_node(id, None)` for a card runs the same solve (the files view's space);
+    `focus_node(id, Some(d))` keeps the target's angles and is the walk's re-centre.
+  - **The fit:** a card's fit set is the card and its links in its own region (`vis.adj`, the
+    walk list's members), padded by a card's radius rather than a region's 12 units, so a tight
+    set still fills 0.6–0.8 of the pane. A point is drawn no larger than 22 CSS px
+    (`POINT_MAX_PX`, a uniform the GL and the picking share), so a small fitted set shows its
+    arrangement, not a few giant discs. A zoom-in crossing from system to focus re-solves with
+    the asked distance as its cap.
+  - **Tiers:** a focused folder's children seed tier 1 (its walk list's "Subfolder" and "In this
+    folder" members); the root seeds none. With nothing selected, the active region's folders are
+    still drawn as points at system scale (P3's look); with a selection the tiers alone decide.
+    `vis::importance` holds the size rule `vis_of` uses.
+  - **Portals** are decided with the tiers: a hot edge whose link is in a top-level folder out of
+    focus. Each frame draws it as a screen-space line from the focus to the card when the card
+    projects inside the pane, otherwise to its region's glyph where it was drawn.
+  - **Hooks:** a node's tier rides in its colour texel with its style (`style + 8·tier`, 4 when not
+    drawn), so `data-tiers` and `data-focus-n` (nodes uploaded at tier 0 or 1) count from the
+    uploaded buffer. `data-drawn` now counts the cards in the draw list, the whole tier set,
+    behind-the-camera points included (they go first in the order and the GL drops them), which
+    replaces P2's "in front of the near plane": at focus scale another region's links can sit
+    behind the camera, and R8's count must hold wherever it is. `data-edges` adds the portals
+    drawn. `data-focus-ids` is the last card solve's fit set. `data-axis-err` and `data-fit`
+    (PLAN § 2.8) are not written; the axis check computes from `data-view`.
+  - **Compass:** it sits above the legend when the legend reaches under it, and region names keep
+    clear of its box. Its colours are `--graph-compass` and `--graph-compass-far`.
+  - **The walk target's thicker edge** (PLAN § 2.5) moves to P6, with the walk.
+  - `keys.mjs`: `KEYS_VERBOSE=1` prints passing checks' detail. The env.sh KB's hub has no
+    well-defined axis (λ₁/λ₀ = 1.095), so the axis check also solves for the most connected card
+    whose set has λ₁/λ₀ ≥ 1.25, and the axis itself is always graded.
 - **Verify:** `sh spec/graph-galaxy/verify/gate.sh P4`.
 - **Touches:** `okt-client/src/graph.rs`, `okt-client/src/graph/{vis,gl,overlay,cam}.rs`,
   `okt-client/src/nav.rs`, `okt-client/static/app.css`, `tests/ui/keys.mjs`.
@@ -514,6 +548,7 @@ carry the target's path.
   - `angular_ties`.
   - `angular_portal_rim`.
 - [ ] `graph.rs` walk:
+  - The walk target's edge is drawn thicker (PLAN § 2.5; moved here from P4).
   - Membership comes from `insp::walk_list`. The order is computed from the destination pose and
     frozen per walk; a user orbit or zoom re-sorts it and re-finds the target by id.
   - The camera holds still during j/k, except a small re-fit for an off-pane target in the region.

@@ -1,5 +1,14 @@
 //! What the graph draws, as pure data: the region each node belongs to, who links to whom, how
-//! many links join each pair of regions, and how heavily the bundle between them is drawn.
+//! many links join each pair of regions, how heavily the bundle between them is drawn, and, for a
+//! focus, which tier each node is drawn at and which edges are drawn.
+//!
+//! **Tiers** count link hops from the focus: 0 the focus, 1 its direct links, 2 two hops, 3 the
+//! rest of the focused region. Hops never pass through a folder, or every card in it would be two
+//! hops from anything linked to it. The focus set (tiers 0 and 1) is drawn in any region; tiers 2
+//! and 3 only inside the focused region, and tier 3 only when there is one focused region (several,
+//! as for a search's matches, would bring every card of each back). Everything else folds into
+//! its region's glyph. A collapsed folder folds its tier-3 cards into its own point; "show all"
+//! hides nothing.
 //!
 //! A region is a top-level folder. The root's own cards (the core, `.`) and the external systems
 //! (`@`) are pseudo-regions: each gets a glyph of its own, but neither counts as a region, gets a
@@ -41,7 +50,6 @@ pub struct Vis {
     pub ix: BTreeMap<String, usize>,
     /// every node's neighbours over link edges, both directions, sorted and distinct (the walk
     /// out from a focus runs over it)
-    #[cfg_attr(not(test), allow(dead_code))]
     pub adj: Vec<Vec<usize>>,
     /// each node's region, as an index into `regions`
     pub region: Vec<usize>,
@@ -147,6 +155,154 @@ pub fn bundle_weight(n: f64, n_max: f64) -> (f64, f64) {
     let lmax = (1.0 + n_max.max(n).max(0.0)).ln();
     let frac = if lmax > 0.0 { l / lmax } else { 0.0 };
     (0.8 + 0.9 * l, 0.10 + 0.55 * frac)
+}
+
+/// Not drawn: folded into its region's glyph, or into a collapsed folder's point.
+pub const HIDDEN: u8 = u8::MAX;
+
+/// What is in focus: the nodes at its centre (tier 0), nodes that join tier 1 without a link (a
+/// selected folder's own children), and the focused regions. No centre and no regions is no
+/// selection: nothing but the glyphs is drawn.
+#[derive(Clone, Copy, Debug)]
+pub struct Focus<'a> {
+    pub centre: &'a [usize],
+    pub kids: &'a [usize],
+    pub regions: &'a [usize],
+}
+
+/// Each node's tier for a focus, [`HIDDEN`] when it is not drawn. `folder` marks the nodes a hop
+/// may reach but never pass through (folders and the root); `fold` names, for a node under a
+/// collapsed folder, that folder. Under `show_all` every node is drawn, at its hop count capped at
+/// 3, whatever is collapsed.
+pub fn tiers(
+    vis: &Vis,
+    f: &Focus,
+    folder: &[bool],
+    fold: &[Option<usize>],
+    show_all: bool,
+) -> Vec<u8> {
+    let n = vis.adj.len();
+    let mut hop = vec![u8::MAX; n];
+    let mut ring: Vec<usize> = Vec::new();
+    for &c in f.centre.iter().filter(|&&c| c < n) {
+        if hop[c] != 0 {
+            hop[c] = 0;
+            ring.push(c);
+        }
+    }
+    // the centre is where the walk starts, so a focused folder's own links count; past it,
+    // folders end a path
+    let mut next: Vec<usize> = Vec::new();
+    for &c in &ring {
+        for &m in &vis.adj[c] {
+            if hop[m] == u8::MAX {
+                hop[m] = 1;
+                next.push(m);
+            }
+        }
+    }
+    for &k in f.kids.iter().filter(|&&k| k < n) {
+        if hop[k] == u8::MAX {
+            hop[k] = 1;
+            next.push(k);
+        }
+    }
+    for &c in &next {
+        if folder.get(c).copied().unwrap_or(false) {
+            continue;
+        }
+        for &m in &vis.adj[c] {
+            if hop[m] == u8::MAX {
+                hop[m] = 2;
+            }
+        }
+    }
+    let one = f.regions.len() == 1;
+    let mut t: Vec<u8> = (0..n)
+        .map(|c| {
+            let h = hop[c];
+            if show_all {
+                h.min(3)
+            } else if h <= 1 {
+                h
+            } else if f.regions.contains(&vis.region[c]) {
+                match h {
+                    2 => 2,
+                    _ if one => 3,
+                    _ => HIDDEN,
+                }
+            } else {
+                HIDDEN
+            }
+        })
+        .collect();
+    if !show_all {
+        for c in 0..n {
+            if let (3, Some(Some(by))) = (t[c], fold.get(c)) {
+                t[c] = HIDDEN;
+                if t[*by] == HIDDEN {
+                    t[*by] = 3;
+                }
+            }
+        }
+    }
+    t
+}
+
+/// How an edge between two nodes is drawn, by their tiers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EdgeKind {
+    /// the focus to its links (or between two focus nodes): full weight
+    Hot,
+    /// between two of the focus's links
+    Faint,
+    /// from a link to a card two hops out: the path to the focus
+    Dim,
+    /// the focus to a link in a region out of focus: drawn out to that region's glyph on the rim
+    Portal,
+    /// under "show all", any other edge
+    Plain,
+}
+
+/// Whether and how the edge `a`–`b` is drawn, given every node's tier: only edges that touch the
+/// focus set, so never one between two tier-2 cards or from a tier-3 card, and never one whose
+/// end is not drawn. A hot edge to a top-level folder's card outside the focused `regions` is a
+/// portal. Under `show_all` every edge is drawn.
+pub fn edge_kind(
+    vis: &Vis,
+    t: &[u8],
+    regions: &[usize],
+    a: usize,
+    b: usize,
+    show_all: bool,
+) -> Option<EdgeKind> {
+    let (ta, tb) = (*t.get(a)?, *t.get(b)?);
+    let (lo, hi) = (ta.min(tb), ta.max(tb));
+    let kind = match (lo, hi) {
+        _ if hi == HIDDEN => None,
+        (0, 0) | (0, 1) => Some(EdgeKind::Hot),
+        (1, 1) => Some(EdgeKind::Faint),
+        (1, 2) => Some(EdgeKind::Dim),
+        _ => None,
+    };
+    if show_all {
+        return Some(kind.unwrap_or(EdgeKind::Plain));
+    }
+    if kind == Some(EdgeKind::Hot) && lo != hi {
+        let far = if ta == 1 { a } else { b };
+        let r = vis.region[far];
+        if vis.is_region(r) && !regions.contains(&r) {
+            return Some(EdgeKind::Portal);
+        }
+    }
+    kind
+}
+
+/// How much larger than a bare card a card is drawn: it grows with the log of its links, and an
+/// index card is larger still.
+pub fn importance(degree: f64, index: bool) -> f64 {
+    let k = 1.0 + 0.35 * (1.0 + degree.max(0.0)).ln();
+    if index { k * 1.4 } else { k }
 }
 
 #[cfg(test)]
@@ -261,5 +417,273 @@ mod tests {
         );
         // a lone bundle is its own maximum
         assert!((super::bundle_weight(3.0, 0.0).1 - 0.65).abs() < 1e-12);
+    }
+
+    /// A small KB for the tier tests: the focus `a/f.md` links to `a/l.md` (same region) and
+    /// `c/x.md` (another region); `a/l.md` links on to `a/two.md` and `c/two.md`; `c/x.md` links
+    /// on to `d/two.md`; `a/far.md` and `c/far.md` are linked to nothing; `a/f.md` also links to
+    /// the folder `a/s/`, which links to `a/behind.md`, and to the surface `@slack` and the root
+    /// card `AGENTS.md`.
+    struct Kb {
+        nodes: Vec<VNode<'static>>,
+        vis: Vis,
+        folder: Vec<bool>,
+    }
+
+    impl Kb {
+        fn new() -> Kb {
+            let ids = [
+                ".",
+                "AGENTS.md",
+                "@slack",
+                "a/",
+                "a/f.md",
+                "a/l.md",
+                "a/two.md",
+                "a/far.md",
+                "a/s/",
+                "a/s/in.md",
+                "a/behind.md",
+                "c/",
+                "c/x.md",
+                "c/two.md",
+                "c/far.md",
+                "d/",
+                "d/two.md",
+            ];
+            let nodes: Vec<VNode> = ids.iter().map(|i| node(i)).collect();
+            let i = |id: &str| nodes.iter().position(|n| n.id == id).unwrap();
+            let edges = [
+                ("a/f.md", "a/l.md"),
+                ("c/x.md", "a/f.md"),
+                ("a/l.md", "a/two.md"),
+                ("a/l.md", "c/two.md"),
+                ("c/x.md", "d/two.md"),
+                ("a/f.md", "a/s/"),
+                ("a/s/", "a/behind.md"),
+                ("a/f.md", "@slack"),
+                ("AGENTS.md", "a/f.md"),
+                ("a/l.md", "c/x.md"),
+                ("a/two.md", "c/two.md"),
+                ("a/two.md", "a/far.md"),
+            ]
+            .map(|(s, t)| (i(s), i(t), 1.0))
+            .to_vec();
+            let order = [".", "@", "a/", "c/", "d/"].map(String::from).to_vec();
+            let vis = build(&nodes, &edges, &order);
+            let folder = nodes
+                .iter()
+                .map(|n| n.id.ends_with('/') || n.id == ".")
+                .collect();
+            Kb { nodes, vis, folder }
+        }
+        fn i(&self, id: &str) -> usize {
+            self.vis.ix[id]
+        }
+        fn r(&self, id: &str) -> usize {
+            self.vis.region[self.i(id)]
+        }
+        /// Tiers for a focus on `centre`, in `regions`, nothing collapsed.
+        fn tiers(&self, centre: &[&str], regions: &[&str], show_all: bool) -> Vec<u8> {
+            let c: Vec<usize> = centre.iter().map(|x| self.i(x)).collect();
+            let r: Vec<usize> = regions.iter().map(|x| self.r(x)).collect();
+            let fold = vec![None; self.nodes.len()];
+            let f = Focus {
+                centre: &c,
+                kids: &[],
+                regions: &r,
+            };
+            tiers(&self.vis, &f, &self.folder, &fold, show_all)
+        }
+    }
+
+    #[test]
+    fn hidden_two_hop_other_region() {
+        let kb = Kb::new();
+        let t = kb.tiers(&["a/f.md"], &["a/f.md"], false);
+        let at = |id: &str| t[kb.i(id)];
+        assert_eq!(at("a/f.md"), 0);
+        assert_eq!(at("a/l.md"), 1);
+        // two hops out: drawn dim in the focused region, folded into its glyph elsewhere
+        assert_eq!(at("a/two.md"), 2);
+        assert_eq!(at("c/two.md"), HIDDEN);
+        assert_eq!(at("d/two.md"), HIDDEN);
+        // the rest of the focused region is tier 3; the rest of every other region is not drawn
+        assert_eq!(at("a/far.md"), 3);
+        assert_eq!(at("c/far.md"), HIDDEN);
+    }
+
+    #[test]
+    fn focus_set_any_region() {
+        let kb = Kb::new();
+        let t = kb.tiers(&["a/f.md"], &["a/f.md"], false);
+        // direct links are drawn wherever they are: another region, a surface, a root card
+        for id in ["c/x.md", "@slack", "AGENTS.md", "a/l.md", "a/s/"] {
+            assert_eq!(t[kb.i(id)], 1, "{id}");
+        }
+        // and so is the focus itself, in any region, whatever regions are focused
+        let t = kb.tiers(&["c/x.md"], &["a/f.md"], false);
+        assert_eq!(t[kb.i("c/x.md")], 0);
+        assert_eq!(t[kb.i("d/two.md")], 1);
+        assert_eq!(t[kb.i("a/f.md")], 1);
+    }
+
+    #[test]
+    fn folders_terminal() {
+        let kb = Kb::new();
+        let t = kb.tiers(&["a/f.md"], &["a/f.md"], false);
+        // a/behind.md is two hops out only through the folder a/s/, which ends the path
+        assert_eq!(t[kb.i("a/s/")], 1);
+        assert_eq!(t[kb.i("a/behind.md")], 3);
+        // a focused folder still reaches out over its own links, and its children are tier 1
+        let c = [kb.i("a/s/")];
+        let kids = [kb.i("a/s/in.md")];
+        let r = [kb.r("a/s/")];
+        let fold = vec![None; kb.nodes.len()];
+        let f = Focus {
+            centre: &c,
+            kids: &kids,
+            regions: &r,
+        };
+        let t = tiers(&kb.vis, &f, &kb.folder, &fold, false);
+        assert_eq!(t[kb.i("a/s/")], 0);
+        assert_eq!(t[kb.i("a/s/in.md")], 1);
+        assert_eq!(t[kb.i("a/behind.md")], 1);
+        assert_eq!(t[kb.i("a/f.md")], 1);
+        // from a/f.md (tier 1, a card) the walk goes on to two hops
+        assert_eq!(t[kb.i("a/l.md")], 2);
+        // a root card's links are tier 1; past them, another region's cards are not drawn
+        let t = kb.tiers(&["AGENTS.md"], &["AGENTS.md"], false);
+        assert_eq!(t[kb.i("a/f.md")], 1);
+        assert_eq!(t[kb.i("a/l.md")], HIDDEN, "two hops, another region");
+    }
+
+    #[test]
+    fn no_tier3_multi_region() {
+        let kb = Kb::new();
+        let single = kb.tiers(&["a/f.md"], &["a/f.md"], false);
+        assert_eq!(single[kb.i("a/far.md")], 3);
+        // a focus over two regions (a search's matches): no tier 3 in either, tier 2 still drawn
+        let multi = kb.tiers(&["a/f.md", "c/far.md"], &["a/f.md", "c/far.md"], false);
+        assert_eq!(multi[kb.i("a/far.md")], HIDDEN);
+        assert_eq!(multi[kb.i("a/behind.md")], HIDDEN);
+        assert_eq!(multi[kb.i("a/two.md")], 2);
+        assert_eq!(multi[kb.i("c/two.md")], 2);
+        assert_eq!(multi[kb.i("c/far.md")], 0);
+        assert!(multi.iter().all(|&t| t != 3));
+    }
+
+    #[test]
+    fn edge_rule() {
+        let kb = Kb::new();
+        let regions = [kb.r("a/f.md")];
+        let t = kb.tiers(&["a/f.md"], &["a/f.md"], false);
+        let e = |a: &str, b: &str| edge_kind(&kb.vis, &t, &regions, kb.i(a), kb.i(b), false);
+        assert_eq!(e("a/f.md", "a/l.md"), Some(EdgeKind::Hot));
+        assert_eq!(e("a/l.md", "a/f.md"), Some(EdgeKind::Hot));
+        assert_eq!(e("a/l.md", "c/x.md"), Some(EdgeKind::Faint));
+        assert_eq!(e("a/l.md", "a/two.md"), Some(EdgeKind::Dim));
+        // a link in another region runs out to the rim; a surface or a root card does not
+        assert_eq!(e("c/x.md", "a/f.md"), Some(EdgeKind::Portal));
+        assert_eq!(e("a/f.md", "@slack"), Some(EdgeKind::Hot));
+        assert_eq!(e("AGENTS.md", "a/f.md"), Some(EdgeKind::Hot));
+        // no edge to a card not drawn, none between two tier-2 cards, none from tier 3
+        assert_eq!(e("a/l.md", "c/two.md"), None);
+        assert_eq!(e("c/x.md", "d/two.md"), None);
+        assert_eq!(e("a/two.md", "a/far.md"), None);
+        assert_eq!(e("a/s/", "a/behind.md"), None);
+        let t2 = vec![2u8; kb.nodes.len()];
+        assert_eq!(edge_kind(&kb.vis, &t2, &regions, 0, 1, false), None);
+        let t3 = vec![3u8; kb.nodes.len()];
+        assert_eq!(edge_kind(&kb.vis, &t3, &regions, 0, 1, false), None);
+        // with the focus's region and c/ both focused, c/x.md is no portal
+        let both = [kb.r("a/f.md"), kb.r("c/x.md")];
+        assert_eq!(
+            edge_kind(&kb.vis, &t, &both, kb.i("c/x.md"), kb.i("a/f.md"), false),
+            Some(EdgeKind::Hot)
+        );
+    }
+
+    #[test]
+    fn show_all_hides_nothing() {
+        let kb = Kb::new();
+        let n = kb.nodes.len();
+        // everything under a/ folded into a/s/ ... and c/far.md folded too: show all ignores it
+        let mut fold = vec![None; n];
+        for id in ["a/far.md", "a/behind.md", "c/far.md"] {
+            fold[kb.i(id)] = Some(kb.i("a/s/"));
+        }
+        let c = [kb.i("a/f.md")];
+        let r = [kb.r("a/f.md")];
+        let f = Focus {
+            centre: &c,
+            kids: &[],
+            regions: &r,
+        };
+        let t = tiers(&kb.vis, &f, &kb.folder, &fold, true);
+        assert!(t.iter().all(|&x| x <= 3), "{t:?}");
+        assert_eq!(t[kb.i("a/f.md")], 0);
+        assert_eq!(t[kb.i("c/two.md")], 2);
+        assert_eq!(t[kb.i("c/far.md")], 3);
+        // with nothing selected too
+        let none = Focus {
+            centre: &[],
+            kids: &[],
+            regions: &[],
+        };
+        let t0 = tiers(&kb.vis, &none, &kb.folder, &fold, true);
+        assert!(t0.iter().all(|&x| x == 3));
+        // and every edge is drawn
+        for (a, b) in [
+            (0, 1),
+            (kb.i("a/two.md"), kb.i("a/far.md")),
+            (kb.i("c/x.md"), kb.i("d/two.md")),
+        ] {
+            assert!(edge_kind(&kb.vis, &t, &r, a, b, true).is_some());
+            assert!(edge_kind(&kb.vis, &t0, &r, a, b, true).is_some());
+        }
+        // off, nothing selected draws no card at all
+        let off = tiers(&kb.vis, &none, &kb.folder, &fold, false);
+        assert!(off.iter().all(|&x| x == HIDDEN));
+    }
+
+    #[test]
+    fn collapse_folds_tier3_only() {
+        let kb = Kb::new();
+        let n = kb.nodes.len();
+        let mut fold = vec![None; n];
+        // a/ collapsed into its folder point: its tier-3 cards fold, the focus set never does
+        for id in [
+            "a/far.md",
+            "a/behind.md",
+            "a/l.md",
+            "a/f.md",
+            "a/two.md",
+            "a/s/in.md",
+        ] {
+            fold[kb.i(id)] = Some(kb.i("a/"));
+        }
+        let c = [kb.i("a/f.md")];
+        let r = [kb.r("a/f.md")];
+        let f = Focus {
+            centre: &c,
+            kids: &[],
+            regions: &r,
+        };
+        let t = tiers(&kb.vis, &f, &kb.folder, &fold, false);
+        assert_eq!(t[kb.i("a/far.md")], HIDDEN);
+        assert_eq!(t[kb.i("a/behind.md")], HIDDEN);
+        assert_eq!(t[kb.i("a/s/in.md")], HIDDEN);
+        assert_eq!(t[kb.i("a/")], 3, "the collapsed folder stands for them");
+        assert_eq!(t[kb.i("a/f.md")], 0);
+        assert_eq!(t[kb.i("a/l.md")], 1);
+        assert_eq!(t[kb.i("a/two.md")], 2);
+    }
+
+    #[test]
+    fn importance_grows() {
+        assert_eq!(importance(0.0, false), 1.0);
+        assert!(importance(10.0, false) > importance(1.0, false));
+        assert!((importance(3.0, true) / importance(3.0, false) - 1.4).abs() < 1e-12);
     }
 }

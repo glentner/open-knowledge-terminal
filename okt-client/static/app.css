@@ -22,7 +22,7 @@
   --fs: 12.5px;
   --reader: var(--mono);
   --ticker-h: 22px;
-  /* the graph: far cards fade toward the fog; the selection's halo */
+  /* the graph: far cards fade toward the fog; the focus's halo (light added on a dark background) */
   --graph-fog: var(--graph-bg);
   --graph-halo: var(--accent);
   /* the galaxy: a region glyph's halo (its family colour) at this peak alpha; the bundles between
@@ -31,6 +31,14 @@
   --graph-glyph-alpha: .30;
   --graph-bundle: var(--ink-2);
   --graph-rim-inset: 34px;
+  /* focus scale, by link hops from the focus: a card two hops out at this alpha, the rest of the
+     focused region at this one (the focus and its links at full strength, nothing else drawn) */
+  --graph-t2-alpha: .55;
+  --graph-t3-alpha: .22;
+  /* the compass in the pane's bottom-right corner: its near axes, and its far axes, horizon and
+     scale word (the overlay's font, #goverlay) */
+  --graph-compass: var(--ink-2);
+  --graph-compass-far: var(--faint);
 }
 
 :root[data-theme="terminal"] {

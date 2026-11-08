@@ -266,6 +266,88 @@ pub fn fit_distance(
     d
 }
 
+/// The direction (from the target toward the eye) to look at a set of points along: its exact
+/// smallest principal axis, so the plane it spreads in most faces the screen, signed toward
+/// `view`, the current view direction. The covariance is uniform over the points.
+///
+/// When that axis is not defined, the direction is the one closest to `view` among those that
+/// are equally good:
+/// - no point, one point, or every point at one place: `view` itself;
+/// - two points, or all on one line: perpendicular to the line;
+/// - the next eigenvalue within 10% of the smallest (`λ₁/λ₀ < 1.1`, a ratio, never a fraction of
+///   the trace, which would call a well-defined axis degenerate): in the plane of the two
+///   smallest axes, or anywhere when the largest is within 10% of the middle one as well.
+pub fn solve_view(pts: &[V3], view: V3) -> V3 {
+    let v = unit(view).unwrap_or([0.0, 0.0, 1.0]);
+    let n = pts.len();
+    if n < 2 {
+        return v;
+    }
+    let mut m = [0.0; 3];
+    for p in pts {
+        for k in 0..3 {
+            m[k] += p[k] / n as f64;
+        }
+    }
+    let mut c = [[0.0; 3]; 3];
+    for p in pts {
+        let q = sub(*p, m);
+        for a in 0..3 {
+            for b in 0..3 {
+                c[a][b] += q[a] * q[b] / n as f64;
+            }
+        }
+    }
+    let tr = c[0][0] + c[1][1] + c[2][2];
+    if tr <= 1e-24 * (1.0 + dot(m, m)) {
+        return v;
+    }
+    let (l, e) = eig3(c);
+    let toward = |d: V3| {
+        if dot(d, v) < 0.0 {
+            [-d[0], -d[1], -d[2]]
+        } else {
+            d
+        }
+    };
+    // the view, with its part along `away` removed (the closest direction perpendicular to it)
+    let across = |away: V3, or: V3| {
+        let k = dot(v, away);
+        unit([v[0] - k * away[0], v[1] - k * away[1], v[2] - k * away[2]]).unwrap_or(or)
+    };
+    if n == 2 || l[1] < 1e-9 * tr {
+        return toward(across(e[2], e[0]));
+    }
+    let near = |a: f64, b: f64| b < 1.1 * a.max(0.0);
+    if !near(l[0], l[1]) {
+        return toward(e[0]);
+    }
+    if near(l[1], l[2]) {
+        return v;
+    }
+    toward(across(e[2], e[0]))
+}
+
+/// The azimuth and elevation that look along `dir` (from the target toward the eye), the
+/// elevation clamped short of the poles. Straight up or down keeps `theta0`.
+pub fn angles(dir: V3, theta0: f64) -> (f64, f64) {
+    let Some(d) = unit(dir) else {
+        return (wrap_pi(theta0), 0.0);
+    };
+    let psi = d[1].clamp(-1.0, 1.0).asin().clamp(-PSI_MAX, PSI_MAX);
+    let theta = if d[0].hypot(d[2]) < 1e-12 {
+        theta0
+    } else {
+        d[0].atan2(d[2])
+    };
+    (wrap_pi(theta), psi)
+}
+
+fn unit(a: V3) -> Option<V3> {
+    let l = dot(a, a).sqrt();
+    (l > 1e-12 && l.is_finite()).then(|| [a[0] / l, a[1] / l, a[2] / l])
+}
+
 // ---- scales --------------------------------------------------------------------------------
 
 /// The three scales, innermost first: a card and its links, one region, the whole graph.
@@ -433,7 +515,6 @@ pub fn rim_point(p: V3, pose: &Pose, pane: Pane, inset: Insets) -> [f64; 2] {
 /// Eigenvalues (ascending, ties by index) and unit eigenvectors of a symmetric 3×3 matrix, by
 /// cyclic Jacobi rotations: orthonormal by construction, robust when eigenvalues repeat, and
 /// bitwise deterministic. The view solve takes the smallest eigenvector of a set's covariance.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn eig3(m: [[f64; 3]; 3]) -> ([f64; 3], [V3; 3]) {
     let mut a = m;
     let mut v = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
@@ -938,5 +1019,207 @@ mod tests {
         assert!((c.d() - 1000.0).abs() < 1e-9 && c.psi == PSI_MAX);
         let o = orbit(&pose, deg(400.0), deg(200.0));
         assert!((o.theta - wrap_pi(0.4 + deg(400.0))).abs() < 1e-12 && o.psi == PSI_MAX);
+    }
+
+    fn add(a: V3, b: V3, k: f64) -> V3 {
+        [a[0] + k * b[0], a[1] + k * b[1], a[2] + k * b[2]]
+    }
+
+    fn near_v(a: V3, b: V3, tol: f64) -> bool {
+        (0..3).all(|k| (a[k] - b[k]).abs() <= tol)
+    }
+
+    /// Six points at ±a·u0, ±b·u1, ±c·u2 about `centre`: a covariance whose eigenvectors are
+    /// exactly the given axes, with eigenvalues a²/3, b²/3, c²/3.
+    fn star(centre: V3, axes: [V3; 3], ext: [f64; 3]) -> Vec<V3> {
+        let mut out = Vec::new();
+        for k in 0..3 {
+            out.push(add(centre, axes[k], ext[k]));
+            out.push(add(centre, axes[k], -ext[k]));
+        }
+        out
+    }
+
+    #[test]
+    fn solve_view_exact_axis() {
+        let mut rng = Rng(7);
+        for _ in 0..200 {
+            let b = basis(rng.range(-PI, PI), rng.range(-1.4, 1.4));
+            let axes = [b.dir, b.r, b.u];
+            let centre = [
+                rng.range(-900.0, 900.0),
+                rng.range(-900.0, 900.0),
+                rng.range(-900.0, 900.0),
+            ];
+            let s0 = rng.range(5.0, 50.0);
+            let ext = [s0, s0 * rng.range(1.2, 3.0), s0 * rng.range(3.5, 9.0)];
+            let pts = star(centre, axes, ext);
+            for sign in [1.0, -1.0] {
+                let view = add([0.1, 0.2, -0.3], b.dir, sign * 2.0);
+                let d = solve_view(&pts, view);
+                let want = if sign > 0.0 {
+                    b.dir
+                } else {
+                    [-b.dir[0], -b.dir[1], -b.dir[2]]
+                };
+                assert!(near_v(d, want, 1e-9), "{d:?} {want:?}");
+            }
+        }
+        // a ratio test, not a fraction of the trace: eigenvalues (1, 1.5, 7.5) are well defined
+        let b = basis(0.7, 0.3);
+        let pts = star(
+            [10.0, 0.0, -5.0],
+            [b.dir, b.r, b.u],
+            [1.0, 1.5f64.sqrt(), 7.5f64.sqrt()],
+        );
+        assert!(near_v(solve_view(&pts, b.dir), b.dir, 1e-9));
+        // points in a plane: its normal, whichever side the view is on
+        let flat: Vec<V3> = (0..12)
+            .map(|k| {
+                let a = k as f64 * 0.7;
+                add(
+                    add([3.0, 4.0, 5.0], b.r, 40.0 * a.cos()),
+                    b.u,
+                    15.0 * a.sin(),
+                )
+            })
+            .collect();
+        assert!(near_v(solve_view(&flat, add(b.dir, b.r, 3.0)), b.dir, 1e-9));
+        let back = [-b.dir[0], -b.dir[1], -b.dir[2]];
+        assert!(near_v(solve_view(&flat, add(back, b.u, 3.0)), back, 1e-9));
+    }
+
+    #[test]
+    fn solve_view_degenerate() {
+        let view = unit([0.3, 0.5, 0.8]).unwrap();
+        let b = basis(-1.1, 0.4);
+        let axes = [b.dir, b.r, b.u];
+        // isotropic: every direction is as good, so the view is kept
+        let iso = star([5.0, 6.0, 7.0], axes, [20.0, 20.0, 20.0]);
+        assert!(near_v(solve_view(&iso, view), view, 1e-9));
+        // nothing, one point, or every point at one place: the view is kept
+        assert!(near_v(solve_view(&[], view), view, 1e-12));
+        assert!(near_v(solve_view(&[[1.0, 2.0, 3.0]], view), view, 1e-12));
+        assert!(near_v(solve_view(&[[1.0, 2.0, 3.0]; 4], view), view, 1e-12));
+        // two points, or a line: perpendicular to it, as close to the view as that allows
+        let line = b.r;
+        let k = dot(view, line);
+        let want = unit(add(view, line, -k)).unwrap();
+        let two = [[0.0, 0.0, 0.0], add([0.0; 3], line, 30.0)];
+        let d2 = solve_view(&two, view);
+        assert!(
+            dot(d2, line).abs() < 1e-9 && near_v(d2, want, 1e-9),
+            "{d2:?}"
+        );
+        let col: Vec<V3> = (0..6)
+            .map(|i| add([1.0, 1.0, 1.0], line, i as f64 * 7.0))
+            .collect();
+        let dc = solve_view(&col, view);
+        assert!(
+            dot(dc, line).abs() < 1e-9 && near_v(dc, want, 1e-9),
+            "{dc:?}"
+        );
+        // the two smallest within 10%: in their plane, as close to the view as that allows
+        let pair = star([0.0; 3], axes, [10.0, 10.0 * 1.04f64.sqrt(), 40.0]);
+        let k = dot(view, b.u);
+        let want = unit(add(view, b.u, -k)).unwrap();
+        let dp = solve_view(&pair, view);
+        assert!(
+            dot(dp, b.u).abs() < 1e-9 && near_v(dp, want, 1e-9),
+            "{dp:?}"
+        );
+        // but with the larger pair within 10% instead, the smallest axis is still exact
+        let disc = star([0.0; 3], axes, [10.0, 40.0, 41.0]);
+        assert!(near_v(solve_view(&disc, b.dir), b.dir, 1e-9));
+    }
+
+    #[test]
+    fn angles_round_trip() {
+        for ti in -11..=12 {
+            for pi in -8..=8 {
+                let (theta, psi) = (deg(ti as f64 * 15.0), deg(pi as f64 * 10.0));
+                let (t, p) = angles(basis(theta, psi).dir, 0.0);
+                assert!(
+                    (wrap_pi(t - theta)).abs() < 1e-12 && (p - psi).abs() < 1e-12,
+                    "{ti} {pi}"
+                );
+            }
+        }
+        // past the clamp: the elevation stops at the limit and the azimuth is kept
+        let (t, p) = angles(basis(0.8, deg(89.0)).dir, 0.0);
+        assert!((t - 0.8).abs() < 1e-9 && p == PSI_MAX);
+        let (t, p) = angles(basis(-2.0, deg(-88.0)).dir, 0.0);
+        assert!((t + 2.0).abs() < 1e-9 && p == -PSI_MAX);
+        // straight up has no azimuth of its own: the given one is kept
+        let (t, p) = angles([0.0, 1.0, 0.0], 1.25);
+        assert!((t - 1.25).abs() < 1e-12 && p == PSI_MAX);
+        // and the clamped direction stays within 5 degrees of the asked one
+        let up = basis(0.3, deg(89.9)).dir;
+        let (t, p) = angles(up, 0.0);
+        assert!(dot(basis(t, p).dir, up) >= deg(5.0).cos() - 1e-12);
+    }
+
+    #[test]
+    fn fit_fills_seventy_percent() {
+        let mut rng = Rng(11);
+        for aspect in [0.5, 1.0, 2.5] {
+            let pane = Pane {
+                w: 800.0 * aspect,
+                h: 800.0,
+            };
+            for _ in 0..50 {
+                let pts: Vec<V3> = (0..rng.range(2.0, 40.0) as usize)
+                    .map(|_| {
+                        [
+                            rng.range(-200.0, 200.0),
+                            rng.range(-200.0, 200.0),
+                            rng.range(-200.0, 200.0),
+                        ]
+                    })
+                    .collect();
+                // looking at their centroid, so some point lies toward the eye and sets the distance
+                let mut target = [0.0; 3];
+                for p in &pts {
+                    target = add(target, *p, 1.0 / pts.len() as f64);
+                }
+                let (theta, psi) = (rng.range(-PI, PI), rng.range(-1.3, 1.3));
+                let d = fit_distance(&pts, target, theta, psi, pane, 0.0, 1.0);
+                let pose = Pose {
+                    target,
+                    theta,
+                    psi,
+                    ln_d: d.ln(),
+                };
+                let worst = pts
+                    .iter()
+                    .map(|p| {
+                        let s = project(*p, &pose, pane).unwrap();
+                        ((s[0] / pane.w * 2.0 - 1.0).abs()).max((1.0 - s[1] / pane.h * 2.0).abs())
+                    })
+                    .fold(0.0, f64::max);
+                assert!((worst - FILL).abs() < 1e-9, "aspect {aspect}: {worst}");
+                // a point nearer the eye than the one that set the distance raises it
+                let b = basis(theta, psi);
+                let (k, _) = pts
+                    .iter()
+                    .enumerate()
+                    .map(|(k, p)| {
+                        let s = project(*p, &pose, pane).unwrap();
+                        (
+                            k,
+                            ((s[0] / pane.w * 2.0 - 1.0).abs())
+                                .max((1.0 - s[1] / pane.h * 2.0).abs()),
+                        )
+                    })
+                    .fold((0, 0.0), |a, x| if x.1 > a.1 { x } else { a });
+                let mut more = pts.clone();
+                more.push(add(pts[k], b.dir, 25.0));
+                let d2 = fit_distance(&more, target, theta, psi, pane, 0.0, 1.0);
+                assert!(d2 > d && (d2 - d - 25.0).abs() < 1e-6, "{d} {d2}");
+            }
+            // a single point at the target fits at the closest distance allowed
+            let t = [4.0, 5.0, 6.0];
+            assert_eq!(fit_distance(&[t], t, 0.3, 0.2, pane, 0.0, 42.0), 42.0);
+        }
     }
 }
