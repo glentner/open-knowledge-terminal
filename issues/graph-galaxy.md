@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:graph-galaxy
 kind: feature
 appetite: big
 ---
