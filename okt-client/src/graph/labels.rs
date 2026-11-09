@@ -6,8 +6,10 @@
 //! is greedy, in one fixed order:
 //!
 //! 1. the walk target's label, so the card the keyboard walk is on is never crowded out;
-//! 2. the region names, in the order given (they are not counted; one that fits nowhere free is
-//!    dropped for that frame);
+//! 2. the region names, in the order given (they are not counted). A name with no free side
+//!    moves further out along its lean, sliding sideways, and is joined to its glyph by a leader
+//!    line ([`leader_spots`]), so a crowded rim still names every cluster; only a name with no
+//!    room anywhere along that line is dropped for the frame;
 //! 3. every other label, by tier, the walk target first within its tier, larger importance first,
 //!    then by path, until the cap is reached.
 //!
@@ -25,6 +27,11 @@ pub const PAD: f64 = 2.0;
 
 /// Room between a point's edge and its label, in CSS px.
 const GAP: f64 = 3.0;
+
+/// How far out along its lean a region name may move, in steps of about its own size, and how
+/// many steps sideways it may slide at each distance (either way).
+const LEADER_STEPS: usize = 14;
+const LEADER_SLIDE: usize = 3;
 
 /// What a label names. Every kind but `Region` counts against the cap.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,6 +143,9 @@ pub struct Placed {
     pub key: usize,
     pub anchor: Anchor,
     pub text: String,
+    /// the point a region name names, when it sits away from its sides: the overlay draws a
+    /// leader line from there to the label
+    pub leader: Option<[f64; 2]>,
 }
 
 impl Placed {
@@ -177,6 +187,39 @@ fn rect_at(c: &Cand, a: Anchor) -> Rect {
     }
 }
 
+/// The spots a region name tries once no side of its glyph is free, nearest first: rects further
+/// out along its lean (toward the pane centre when it has none), at growing distances, each
+/// distance trying the rect on the line and then slid sideways by about its own size.
+pub fn leader_spots(c: &Cand, pane: (f64, f64)) -> Vec<Rect> {
+    let unit = |v: [f64; 2]| {
+        let l = v[0].hypot(v[1]);
+        (l > 1e-9).then(|| [v[0] / l, v[1] / l])
+    };
+    let u = unit(c.lean)
+        .or_else(|| unit([pane.0 / 2.0 - c.x, pane.1 / 2.0 - c.y]))
+        .unwrap_or([0.0, -1.0]);
+    let v = [-u[1], u[0]];
+    // the rect's half-extent along a direction, and a step of about its size along it
+    let half = |d: [f64; 2]| d[0].abs() * c.w / 2.0 + d[1].abs() * c.h / 2.0;
+    let (out, side) = (2.0 * half(u) + PAD, 2.0 * half(v) + PAD);
+    let mut spots = Vec::with_capacity((LEADER_STEPS + 1) * (2 * LEADER_SLIDE + 1));
+    for k in 0..=LEADER_STEPS {
+        let d = c.r.max(0.0) + GAP + half(u) + k as f64 * out;
+        for j in 0..=2 * LEADER_SLIDE {
+            // 0, +1, −1, +2, −2, …
+            let t = if j % 2 == 1 { (j / 2 + 1) as f64 } else { -((j / 2) as f64) };
+            let (cx, cy) = (c.x + u[0] * d + v[0] * t * side, c.y + u[1] * d + v[1] * t * side);
+            spots.push(Rect {
+                x: cx - c.w / 2.0,
+                y: cy - c.h / 2.0,
+                w: c.w,
+                h: c.h,
+            });
+        }
+    }
+    spots
+}
+
 /// Place the labels (see the module comment for the order and the rules) in a pane of
 /// `pane` = (width, height) CSS px. `last_anchor` names the side a key's label sat on last
 /// frame, tried first. Returns the labels placed, in the order they were placed.
@@ -204,26 +247,39 @@ pub fn place(
         {
             sides[..=k].rotate_right(1);
         }
-        for a in sides {
-            let r = rect_at(c, a);
-            if r.inside(pane.0, pane.1)
+        let free = |r: &Rect, placed: &Vec<Placed>| {
+            r.inside(pane.0, pane.1)
                 && obstacles.iter().all(|o| r.clear_of(o, PAD))
                 && placed.iter().all(|p| r.clear_of(&p.rect(), PAD))
-            {
-                placed.push(Placed {
-                    x: r.x,
-                    y: r.y,
-                    w: r.w,
-                    h: r.h,
-                    kind: c.kind,
-                    key: c.key,
-                    anchor: a,
-                    text: c.text.to_string(),
-                });
-                return true;
-            }
-        }
-        false
+        };
+        let spot = sides
+            .iter()
+            .map(|&a| (rect_at(c, a), a, None))
+            .find(|(r, _, _)| free(r, placed))
+            .or_else(|| {
+                if c.kind != Kind::Region {
+                    return None;
+                }
+                leader_spots(c, pane)
+                    .into_iter()
+                    .find(|r| free(r, placed))
+                    .map(|r| (r, sides[0], Some([c.x, c.y])))
+            });
+        let Some((r, anchor, leader)) = spot else {
+            return false;
+        };
+        placed.push(Placed {
+            x: r.x,
+            y: r.y,
+            w: r.w,
+            h: r.h,
+            kind: c.kind,
+            key: c.key,
+            anchor,
+            text: c.text.to_string(),
+            leader,
+        });
+        true
     };
     let walk = cands.iter().position(|c| c.walk && c.kind.counted());
     if let Some(k) = walk
@@ -523,6 +579,55 @@ mod tests {
         let got = place(&[walk, name], &[], (200.0, 30.0), &|_| None);
         assert_eq!(got.len(), 1, "{got:?}");
         assert_eq!(got[0].kind, Kind::Region);
+    }
+
+    #[test]
+    fn rim_names_all_placed() {
+        // 21 region names on the rim of a 1600 × 1000 pane, in tight clusters of three (glyphs a
+        // few px apart, as regions in nearly one direction land), the chrome in three corners:
+        // every name is placed, inside the pane, clear of the chrome and of each other, and the
+        // crowded ones reach their spot by a leader
+        let names = [
+            "activity", "agent", "contact", "decision", "design", "doc", "event", "group",
+            "memory", "message", "method", "note", "org", "policy", "project", "resource",
+            "skill", "system", "talk", "venue", "workspace",
+        ];
+        let at = [
+            (300.0, 34.0), (700.0, 34.0), (1100.0, 34.0), (1500.0, 40.0),
+            (34.0, 400.0), (1566.0, 500.0), (800.0, 966.0),
+        ];
+        let obs = obstacles();
+        let cands: Vec<Cand> = names
+            .iter()
+            .enumerate()
+            .map(|(k, n)| {
+                let (x, y) = at[k / 3];
+                let (x, y) = (x + (k % 3) as f64 * 4.0, y + (k % 3) as f64 * 3.0);
+                let (dx, dy) = (800.0 - x, 500.0 - y);
+                let l = dx.hypot(dy);
+                let mut c = cand(k, Kind::Region, x, y, 8.0 + 7.0 * n.len() as f64);
+                c.r = 5.0;
+                c.h = 14.0;
+                c.text = n;
+                c.lean = [dx / l, dy / l];
+                c
+            })
+            .collect();
+        let got = place(&cands, &obs, (1600.0, 1000.0), &|_| None);
+        let mut named: Vec<&str> = got.iter().map(|p| p.text.as_str()).collect();
+        named.sort();
+        assert_eq!(named, names.to_vec(), "every rim region is named");
+        for (i, a) in got.iter().enumerate() {
+            let ra = a.rect();
+            assert!(ra.inside(1600.0, 1000.0), "{a:?} outside the pane");
+            for o in &obs {
+                assert!(ra.clear_of(o, PAD), "{a:?} on the chrome {o:?}");
+            }
+            for b in &got[i + 1..] {
+                assert!(ra.clear_of(&b.rect(), PAD), "{a:?} overlaps {b:?}");
+            }
+        }
+        assert!(got.iter().any(|p| p.leader.is_some()), "no name needed a leader");
     }
 
     #[test]

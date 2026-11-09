@@ -30,13 +30,15 @@ struct Face {
 
 /// The overlay's text styles, read from the `#goverlay` rule: region names (the rule's own font
 /// and colour), card labels (`--glab-font`, `--glab-ink`), the focus's label (`--glab-focus-font`
-/// in `--glab-accent`) and portal labels (the card font in `--glab-accent`).
+/// in `--glab-accent`) and portal labels (the card font in `--glab-accent`); and the leader line
+/// from a rim glyph to a name placed away from it (`--glab-leader`).
 struct Style {
     region: Face,
     card: Face,
     focus: Face,
     portal: Face,
     knockout: String,
+    leader: String,
 }
 
 impl Style {
@@ -132,6 +134,7 @@ impl Overlay {
                 focus: face("700 10.5px monospace", "#fa0"),
                 portal: face("400 10px monospace", "#fa0"),
                 knockout: "#000".into(),
+                leader: "#666".into(),
             }),
             widths: RefCell::new(Default::default()),
         };
@@ -170,6 +173,9 @@ impl Overlay {
         if let Some(c) = get("--glab-accent") {
             st.focus.ink = c.clone();
             st.portal.ink = c;
+        }
+        if let Some(c) = get("--glab-leader") {
+            st.leader = c;
         }
         st.knockout = knockout.to_string();
         for w in self.widths.borrow_mut().iter_mut() {
@@ -331,13 +337,33 @@ impl Overlay {
     }
 
     /// Draw each label in its rect, in its kind's font and ink, knocked out of the background
-    /// and clipped to the rect.
+    /// and clipped to the rect; a name placed away from its glyph first gets its leader, a line
+    /// from the glyph to the nearest point of the rect.
     fn labels(&self, labels: &[Placed]) {
         if labels.is_empty() {
             return;
         }
         let st = self.style.borrow();
         let ctx = &self.ctx;
+        let leaders: Vec<([f64; 2], [f64; 2])> = labels
+            .iter()
+            .filter_map(|p| {
+                let [x, y] = p.leader?;
+                let near = [x.clamp(p.x, p.x + p.w), y.clamp(p.y, p.y + p.h)];
+                Some(([x, y], near))
+            })
+            .collect();
+        if !leaders.is_empty() {
+            dash(ctx, &[]);
+            ctx.set_line_width(1.0);
+            ctx.set_stroke_style_str(&st.leader);
+            ctx.begin_path();
+            for (a, b) in &leaders {
+                ctx.move_to(a[0], a[1]);
+                ctx.line_to(b[0], b[1]);
+            }
+            ctx.stroke();
+        }
         ctx.set_text_align("start");
         ctx.set_text_baseline("middle");
         ctx.set_line_join("round");

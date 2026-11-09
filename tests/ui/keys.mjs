@@ -824,6 +824,25 @@ const showAll = async on => {
   await twoFrames(page);
 };
 {
+  // at system scale (a folder) and focus scale (a card) every region on the rim carries its name
+  // (a region label's text is its folder without the slash), and no two labels overlap
+  await showAll(false);
+  const big = [...topDirs].sort((a, b) => (regionCards[b] || 0) - (regionCards[a] || 0))[0];
+  const picks = [...new Set(['skill/', 'workspace/', 'contact/index.md', hub, big])].filter(id => nodeIds.has(id));
+  const seen = [];
+  for (const id of picks) {
+    await waits(() => go('#v=graph&s=' + encodeURIComponent(id)));
+    const r = await restedLabels();
+    const scale = await gattr('data-scale'), region = await gattr('data-region');
+    const named = new Set(r.labels.filter(l => l[4] === 'region').map(l => l[5]));
+    const rim = topDirs.filter(d => d !== region);
+    seen.push({ id, scale, region, rim: rim.length, missing: rim.filter(d => !named.has(d.replace(/\/$/, ''))), overlaps: overlaps(r.labels).length });
+  }
+  check('system and focus scale name every rim region',
+    seen.length >= 3 && seen.every(v => ['system', 'focus'].includes(v.scale) && !!v.region && v.rim === topDirs.length - 1 && v.missing.length === 0 && v.overlaps === 0),
+    seen);
+}
+{
   await waits(() => go('#v=graph&s=' + encodeURIComponent(hub)));
   await page.evaluate(() => document.activeElement?.blur());
   await showAll(false);

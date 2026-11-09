@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feat/graph-galaxy
 base: main
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-08'
 phases:
 - id: P1
@@ -34,7 +34,7 @@ phases:
   verify: sh spec/graph-galaxy/verify/gate.sh P7
 - id: P3
   name: Galaxy and system scales, show all
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -457,6 +457,15 @@ depth cues, under a spherical camera.
     drawn. Show all draws no bundles: every link edge is drawn instead.
   - `Cargo.toml` takes `TextMetrics` (the overlay measures the names it places). The `?` GRAPH list
     gains the scales and the show-all button.
+- *Amended in review-cycle-1 remediation (2026-11-08), M3:* at system and focus scale every rim
+  cluster carries its name. A region name with no free side moves out along its lean, sliding
+  sideways, with a leader line back to its glyph (`labels::leader_spots`; `Placed.leader`, drawn
+  by the overlay in `--glab-leader`), and is dropped only when no spot along that line is free;
+  the free test is the one every label passes, so R9's no-overlap holds. New native test
+  `rim_names_all_placed` (21 names in clusters of three on a crowded rim, all placed, disjoint,
+  some by a leader) and the row "system and focus scale name every rim region" (skill/,
+  workspace/, contact/index.md, the hub and the largest region). Touches `graph/labels.rs`,
+  `graph/overlay.rs` and `app.css`, P5's modules: the finding is R2's, so it lands here.
 - **Verify:** `sh spec/graph-galaxy/verify/gate.sh P3`.
 - **Touches:** `okt-client/src/graph.rs`, `okt-client/src/graph/{vis,cam,overlay,gl}.rs`,
   `okt-client/src/state.rs`, `okt-client/src/chrome.rs`, `okt-client/static/{app.css,index.html}`,

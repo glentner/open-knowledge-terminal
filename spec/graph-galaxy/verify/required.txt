@@ -24,6 +24,7 @@ P3|graph::vis::tests::pair_counts
 P3|graph::vis::tests::bundle_weight
 P3|graph::cam::tests::classify_hysteresis
 P3|graph::cam::tests::nearest_region_front_first
+P3|graph::labels::tests::rim_names_all_placed
 P4|graph::vis::tests::hidden_two_hop_other_region
 P4|graph::vis::tests::focus_set_any_region
 P4|graph::vis::tests::folders_terminal

@@ -257,6 +257,10 @@ In show-all, nothing is hidden and every edge draws.
   is dropped for that frame); then cards, until 24 non-region labels are placed. Every non-region
   kind (card, portal) counts against the 24. Each card tries its last anchor, then right, left,
   above, below.
+  - *2026-11-08, review cycle 1 (M3):* a region name with no free side is not dropped while there
+    is room for it: it moves out along its lean (toward the pane centre), sliding sideways, and a
+    leader line joins it to its glyph (`--glab-leader`), so every rim cluster is named (R2). The
+    free test, and so R9's no-overlap, is the same one.
 - **Collisions:** AABBs with 2 px padding. The obstacles are the compass, `.gtools`, `#glegend`,
   `#ghint` and the tier-0 disc.
 - **Motion:** the label set is frozen during motion and re-solved 150 ms after rest. A frozen label
