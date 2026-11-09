@@ -67,6 +67,21 @@ rule to the rows.
 
 **Seed:** [`issues/source-row-token-class.md`](issues/source-row-token-class.md)
 
+### 4. An off-screen Log steps from a stale row mark
+
+Under the 200 px narrow floor the Log is off screen but still takes `j`/`k`. Shown again by back or
+forward, `l` or its LOG tab, it keeps an outdated row mark, so the next step lands on the wrong row.
+Bring the mark up to date on every route, as on screen.
+
+**Seed:** [`issues/offscreen-log-mark.md`](issues/offscreen-log-mark.md)
+
+### 5. A guard on redraws during a sash drag
+
+Only the `KEY_OFF` latch stops an off-screen Log being fully redrawn on every move of a sash drag,
+and no suite check would notice it gone (30 renders for a 30-move drag, against 0). Add the check.
+
+**Seed:** [`issues/sash-drag-redraw-guard.md`](issues/sash-drag-redraw-guard.md)
+
 ---
 
 ## Settled questions
