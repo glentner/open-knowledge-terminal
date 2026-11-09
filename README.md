@@ -80,7 +80,7 @@ yet; `ROADMAP.md` tracks them.
   screen order like a clock hand from 12 o'clock (a dashed ring, a thicker edge, the inspector's
   marked card and the hint show where; a connection in another region is a portal, its edge out
   to that region on the rim, labelled with its path), Enter or space flies there (the camera rises
-  toward the galaxy and comes down on it), `[` flies back to where the camera was and `]` goes
+  toward the galaxy and comes down on it), `[` eases back to where the camera was and `]` goes
   forward again, esc stops; with no walk, space opens or closes the selected folder and Enter
   shows a file's content; `z` turns and fits the camera to the selection and its links, or, from
   the Results view, to the list's matches wherever they are, moving no card. The camera: ←/→

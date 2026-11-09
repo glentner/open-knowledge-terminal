@@ -485,7 +485,7 @@ pub fn show_help() {
         ("y", "copy the path"),
         ("m 1–9", "pin the selection; go to a pin"),
         ("E O F", "edit, open, reveal"),
-        ("[ ]", "back, forward; in the graph the camera flies back, and forward again"),
+        ("[ ]", "back, forward; in the graph the camera eases back to where it was, and forward again"),
         ("↑ ↓ ⏎", "move and open in lists (j k move too)"),
         ("space", "files: open or close a folder, or show a file in the graph"),
         ("← →", "graph: orbit the camera around what it looks at"),

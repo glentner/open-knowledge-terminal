@@ -562,9 +562,10 @@ fn on_key(e: KeyboardEvent) {
             b.scroll_by_with_scroll_to_options(&o);
             true
         }
-        // z frames in place, moving only the camera and pushing no history entry: with the
-        // Results view active, the list's matches across regions; otherwise the selection and
-        // its links (README § Keys)
+        // z frames in place, moving only the camera: with the Results view active, the list's
+        // matches across regions; otherwise the selection and its links (README § Keys). The
+        // frame pushes no history entry of its own; from another view, z switches to the graph,
+        // and that view switch pushes its entry as every view switch does.
         "z" => {
             let matches: Option<Vec<String>> = {
                 let st = s();

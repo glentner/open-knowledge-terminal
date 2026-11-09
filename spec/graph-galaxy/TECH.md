@@ -3,10 +3,10 @@ slug: graph-galaxy
 title: The graph as a navigable 3D space (galaxy, system, focus)
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feat/graph-galaxy
 base: main
-current_phase: P7
+current_phase: done
 last_updated: '2026-11-08'
 phases:
 - id: P1
@@ -83,7 +83,7 @@ phases:
   verify: sh spec/graph-galaxy/verify/gate.sh P7
 - id: P7
   name: Warp flight, history, frame-time gate and ledger
-  status: in_progress
+  status: done
   satisfies:
   - R6
   - R11
@@ -796,6 +796,13 @@ carry the target's path.
   - **`issues/perf-profile-points.md`** records what holds at `HEAD`: `points.json` has six points,
     so the throw research 06 saw needs the file emptied or missing; the live defects are the 6580
     defaults (the legacy profile and `keys.mjs`) and scenarios written for the 2D graph.
+- *Amended in review-cycle-1 remediation (2026-11-08):*
+  - **M5:** `AGENTS.md`'s Map names every `graph/` module (`space`, `cam`, `vis`, `labels`, `gl`,
+    `overlay`; `graph.rs` itself under `graph`), and § Build and test names
+    `tests/perf/profile.mjs --graph` as the graph's frame-time gate.
+  - **L1:** README § Keys and the `?` list say `[` eases back to where the camera was (it is a
+    solved move, not a flight); the `keys.rs` comment on `z` says the frame pushes no entry of
+    its own, while a `z` from another view switches to the graph and that switch pushes one.
 - **Verify:** `sh spec/graph-galaxy/verify/gate.sh P7`.
 - **Touches:** `okt-client/src/keys.rs`, `okt-client/src/nav.rs`, `okt-client/src/graph.rs`,
   `okt-client/src/graph/cam.rs`, `okt-client/src/chrome.rs`, `README.md`, `tests/ui/keys.mjs`,

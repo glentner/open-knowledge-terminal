@@ -14,7 +14,10 @@ cargo test -p okt-server -p okt-pygments -p okt-client
 Browser suites run against a server, normally the throwaway one (`tests/env.sh`, § Factory):
 `tests/ui/keys.mjs` covers the navigation keys (README § Keys); `tests/ui/soak.mjs` checks that
 memory and listeners plateau on a page left open; `tests/perf/profile.mjs` measures main-thread
-cost and frame pacing, and `tests/perf/compare.py` compares two runs. They need Playwright (`npm install` in `tests/`).
+cost and frame pacing, and `tests/perf/compare.py` compares two runs. `tests/perf/profile.mjs
+--graph` is the graph's frame-time gate: headed, against `$OKT` only (never 6580), it orbits,
+orbits with show all on, and warps, and fails a scenario whose p95 frame interval passes 16.7 ms
+(it needs a display of 120 Hz or faster to judge). They need Playwright (`npm install` in `tests/`).
 
 ## Map
 
@@ -24,8 +27,11 @@ cost and frame pacing, and `tests/perf/compare.py` compares two runs. They need 
   `pwa.rs`, `launch.rs` (editor/open/reveal), `main.rs` (CLI, detach/stop).
 - `okt-client/src`: one module per pane or concern (`graph`, `views/*`,
   `insp`, `go`, `chrome`, `live`, `nav`, `keys`, `actions`); `graph/` holds the graph's
-  submodules (the pure `space` layout and `cam` camera math, the WebGL2 `gl` renderer, the flat
-  `overlay`); `js.rs` holds the JavaScript
+  submodules: the pure ones, natively tested, are `space` (the deterministic 3D layout), `cam`
+  (camera math: projection, the view solve, easing, the warp path), `vis` (regions, visibility
+  tiers, the walk's angular order) and `labels` (where the flat labels go, capped and never
+  overlapping); `gl` is the WebGL2 renderer and `overlay` the flat 2D canvas over it (labels,
+  rings, the compass); `js.rs` holds the JavaScript
   semantics the output depends on (number formatting, `toFixed`, `localeCompare`, object key
   order, UTF-16 lengths); `state.rs` holds `S`, settings (localStorage `okt:<kb>`) and the boot data.
 - `okt-client/static`: the page, `app.css` (the stylesheet; its graph tokens and rules are

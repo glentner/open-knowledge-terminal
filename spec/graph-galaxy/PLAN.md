@@ -369,6 +369,8 @@ synchronously, so a test can wait for a move to start before it waits for `data-
 - **README § Keys** (`README.md:79-82`):
   - j/k step "clockwise around the selection, in screen order";
   - Enter/space "fly there", and `[` flies back;
+    - *2026-11-08, review cycle 1 (L1):* `[` eases straight back (a solved move, no flight), and
+      README and the `?` list say so;
   - `z` frames the selection and its links, or the Results matches;
   - ←/→ orbit, PageUp/PageDown tilt;
   - `+`/`−`/`0` act on camera distance;
