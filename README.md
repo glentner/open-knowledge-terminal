@@ -84,9 +84,10 @@ yet; `ROADMAP.md` tracks them.
   forward again, esc stops; with no walk, space opens or closes the selected folder and Enter
   shows a file's content; `z` turns and fits the camera to the selection and its links, or, from
   the Results view, to the list's matches wherever they are, moving no card. The camera: ←/→
-  orbit it around what it looks at and PageUp/PageDown tilt it, while focus is on the page rather
-  than the inspector; `+`/`=` and `-` move it closer and farther, and `0` fits the whole graph,
-  keeping the selection; dragging orbits, and the wheel or a pinch moves it closer or farther.
+  orbit it around what it looks at and PageUp/PageDown tilt it, except after a click in the
+  inspector, where they scroll it as usual until the next press in the graph; `+`/`=` and `-`
+  move it closer and farther, and `0` fits the whole graph, keeping the selection; dragging
+  orbits, and the wheel or a pinch moves it closer or farther.
   With reduced motion set, every camera move cuts to its end.
 - Anywhere: `J`/`K` scroll the inspector, `s` switches between source and rendered, `y` copies the
   path, `m` pins the selection and `1`–`9` go to the pins (kept per KB), `n`/`N` step through FIND

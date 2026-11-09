@@ -129,6 +129,11 @@ From [04](research/04-camera.md), with one correction (digest § 3):
     the graph view is active and `document.activeElement` is neither inside the inspector
     (`#insp`) nor an input. Otherwise the key falls through to the browser, so a focused inspector
     still scrolls natively (row D1);
+    - *2026-11-08, review cycle 1 (M1):* the test is where the user last pressed a pointer, not
+      `document.activeElement`: a click in the inspector's text focuses nothing, so the focus test
+      took PageUp/PageDown from a reader. A pointerdown inside `#insp` hands ←/→ and
+      PageUp/PageDown to the browser until the next pointerdown in the graph pane (`#v-graph`);
+      focus inside `#insp` or in an input still hands them over too.
   - `+`/`=` and `−`: `ln d ∓ ln 1.35`;
   - `0`: always the galaxy fit, keeping the selection, as today's `0` fits the whole graph
     whatever is selected (`graph.rs:1006`). The `.gtools` fit button and a double-click on empty

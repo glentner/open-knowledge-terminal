@@ -21,7 +21,7 @@ P2|ArrowLeft orbits the azimuth back|waits; data-theta returns within 1 degree
 P2|PageUp tilts the elevation|waits; data-psi changes by 10 +- 1 degrees
 P2|PageDown tilts the elevation back|waits; data-psi returns within 1 degree
 P2|orbit keys leave the layout and the selection|across the four orbit keys: data-layout, data-pos-hash and the hash s= unchanged
-P2|orbit keys leave a focused inspector alone|focus inside the inspector (focus #ibody, made focusable if it is not, with content taller than the pane): ArrowRight, ArrowLeft, PageUp and PageDown leave data-move, data-theta and data-psi unchanged
+P2|orbit keys give the inspector its scroll keys after a click in it|on the hub with the content tab, #ibody scrolled to 0 and taller than its box: a mouse click on inspector text holding no link or control, with no tabIndex set by the test and none on #ibody or inside it; PageDown raises #ibody scrollTop above 0 and PageUp lowers it again; across PageDown, PageUp, ArrowRight and ArrowLeft, data-move, data-theta and data-psi unchanged; then a drag on #graph, and ArrowRight: waits; data-theta changes by 15 +- 1 degrees
 P2|ArrowDown still walks in the graph|with a selection, ArrowDown makes #ghint read 1/N and marks a chip; ArrowUp steps back
 P2|+ moves the camera closer|waits; data-dist falls by a factor 1.35 +- 2%
 P2|= moves the camera closer|waits; data-dist falls by a factor 1.35 +- 2%

@@ -6,9 +6,10 @@
 //   ANY    J/K scroll the inspector, s source/rendered, y copies the path, m and 1-9 pins,
 //          n/N FIND matches, E/O/F edit/open/reveal (the request is intercepted, nothing opens)
 //   CAMERA the WebGL scene and its camera: the canvas draws, orbit keys turn by fixed steps and
-//          leave the layout, the selection and a focused inspector alone, + = - 0 act on the
-//          distance, drag orbits, wheel and pinch zoom, moves ease (and cut under reduced
-//          motion), and the scene comes back after a lost GL context
+//          leave the layout and the selection alone, and after a click in the inspector they
+//          scroll it until a pointer in the graph takes them back; + = - 0 act on the distance,
+//          drag orbits, wheel and pinch zoom, moves ease (and cut under reduced motion), and the
+//          scene comes back after a lost GL context
 //   SCALES nothing selected shows the galaxy (a glyph per region, the bundles, region names only);
 //          a folder brings its region to system scale with the others on the rim; zooming out
 //          crosses focus, system, galaxy and zooming in at galaxy enters the region nearest the
@@ -337,21 +338,51 @@ await page.evaluate(() => document.activeElement?.blur());
     all.map(c => ({ layout: c.layout, posHash: c.posHash, sel: c.sel })));
 }
 {
+  // the state a reader is in: a click on the inspector's text (nothing there takes focus, and the
+  // test sets no tabIndex), then the scroll keys
   await go('#v=graph&s=' + encodeURIComponent(hub) + '&tab=content');
-  const focused = await page.evaluate(() => {
+  const spot = await page.evaluate(() => {
     const b = document.getElementById('ibody');
-    if (b.tabIndex < 0 && !b.hasAttribute('tabindex')) b.tabIndex = -1;
-    b.focus();
-    return { inInsp: !!document.activeElement?.closest('#insp'), tall: b.scrollHeight > document.getElementById('v-graph').clientHeight };
+    b.scrollTop = 0;
+    const br = b.getBoundingClientRect();
+    for (const el of b.querySelectorAll('article.md p, article.md li, article.md h1, article.md h2, pre')) {
+      const r = el.getBoundingClientRect();
+      if (r.height < 4 || r.top < br.top || r.bottom > br.bottom) continue;
+      const x = r.left + 2, y = r.top + r.height / 2;
+      const at = document.elementFromPoint(x, y);
+      if (at && b.contains(at) && !at.closest('a, button, input, textarea, select, [data-go], [tabindex]')) return { x, y, tag: at.tagName };
+    }
+    return null;
   });
+  if (spot) await page.mouse.click(spot.x, spot.y);
+  await page.waitForTimeout(150);
+  const before = await page.evaluate(() => {
+    const b = document.getElementById('ibody');
+    return { active: document.activeElement?.tagName, tabindex: b.hasAttribute('tabindex') || !!b.querySelector('[tabindex]'), tall: b.scrollHeight > b.clientHeight + 200, top: b.scrollTop };
+  });
+  const scrollTop = () => page.evaluate(() => document.getElementById('ibody').scrollTop);
   const c0 = await cam();
-  for (const k of ['ArrowRight', 'ArrowLeft', 'PageUp', 'PageDown']) await key(k, 250);
+  await key('PageDown', 400);
+  const down = await scrollTop();
+  await key('PageUp', 400);
+  const up = await scrollTop();
+  for (const k of ['ArrowRight', 'ArrowLeft']) await key(k, 250);
   await twoFrames(page);
   const c1 = await cam();
-  check('orbit keys leave a focused inspector alone',
-    focused.inInsp && focused.tall && c1.move === c0.move && c1.theta === c0.theta && c1.psi === c0.psi,
-    { focused, before: c0, after: c1 });
-  await page.evaluate(() => document.activeElement?.blur());
+  // a pointer in the graph pane takes the keys back
+  const box = await page.locator('#graph').boundingBox();
+  await page.mouse.move(box.x + 40, box.y + box.height - 60);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 80, box.y + box.height - 60, { steps: 4 });
+  await page.mouse.up();
+  await twoFrames(page);
+  const c2 = await cam();
+  await waits(() => page.keyboard.press('ArrowRight'));
+  const c3 = await cam();
+  check('orbit keys give the inspector its scroll keys after a click in it',
+    !!spot && before.active !== 'INPUT' && !before.tabindex && before.tall && before.top === 0 && down > 0 && up < down
+      && c1.move === c0.move && c1.theta === c0.theta && c1.psi === c0.psi && Math.abs(dang(c2.theta, c3.theta) - 15) <= 1,
+    { spot, before, down, up, cam: [c0, c1], back: { from: c2.theta, to: c3.theta } });
 }
 {
   await go('#v=graph&s=' + encodeURIComponent(walker));

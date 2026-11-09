@@ -285,6 +285,24 @@ fn on_click(e: MouseEvent) {
     }
 }
 
+thread_local! {
+    /// Whether the graph's orbit keys (←/→, PageUp/PageDown) belong to the inspector, decided by
+    /// where the user last pressed a pointer: down inside `#insp` gives them to the browser,
+    /// which scrolls the inspector from the text clicked even though nothing there takes focus;
+    /// down in the graph pane takes them back. A pointer anywhere else leaves it as it was.
+    static INSP_KEYS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The capture-phase pointerdown that sets [`INSP_KEYS`].
+fn on_pointer_down(e: PointerEvent) {
+    let t = e.target();
+    if dom::closest(&t, "#insp").is_some() {
+        INSP_KEYS.set(true);
+    } else if dom::closest(&t, "#v-graph").is_some() {
+        INSP_KEYS.set(false);
+    }
+}
+
 fn on_key(e: KeyboardEvent) {
     if e.meta_key() || e.ctrl_key() || e.alt_key() {
         return;
@@ -438,8 +456,9 @@ fn on_key(e: KeyboardEvent) {
             e.prevent_default();
             return;
         }
-        // orbit the camera (README § Keys): only while focus is on the page, so a focused
-        // inspector or input keeps its own arrow and page keys
+        // orbit the camera (README § Keys), unless the keys belong to the inspector: the last
+        // pointerdown was in it (see `INSP_KEYS`), or focus is in it or in an input. Then the key
+        // falls through, and the browser scrolls what the user is reading.
         let orbit = match k.as_str() {
             "ArrowLeft" => Some((-graph::ORBIT_DEG, 0.0)),
             "ArrowRight" => Some((graph::ORBIT_DEG, 0.0)),
@@ -453,7 +472,7 @@ fn on_key(e: KeyboardEvent) {
                 a.closest("#insp").ok().flatten().is_some()
                     || matches!(tag.as_str(), "input" | "textarea" | "select")
             });
-            if !elsewhere {
+            if !elsewhere && !INSP_KEYS.get() {
                 graph::orbit_by(d_theta, d_psi);
                 e.prevent_default();
                 return;
@@ -694,6 +713,14 @@ pub fn wire() {
         spawn(async { nav::apply_hash().await })
     });
     dom::on(dom::doc().as_ref(), "keydown", on_key);
+    // capture, so a handler that stops the event further in still counts as interaction
+    let down = wasm_bindgen::closure::Closure::<dyn FnMut(PointerEvent)>::new(on_pointer_down);
+    let _ = dom::doc().add_event_listener_with_callback_and_bool(
+        "pointerdown",
+        down.as_ref().unchecked_ref(),
+        true,
+    );
+    down.forget();
     // resizable inspector
     let panes = dom::id("panes");
     dom::set_style(&panes, "--insp-w", &format!("{}%", num(cfg().insp)));

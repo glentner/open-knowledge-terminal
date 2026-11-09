@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feat/graph-galaxy
 base: main
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-08'
 phases:
 - id: P1
@@ -22,7 +22,7 @@ phases:
   verify: sh spec/graph-galaxy/verify/gate.sh P7
 - id: P2
   name: WebGL2 scene and the orbit camera
-  status: in_progress
+  status: done
   satisfies:
   - R7
   - R11
@@ -373,6 +373,17 @@ depth cues, under a spherical camera.
     graph draws on nearly every frame.
   - In `keys.mjs`, a screenshot's "colours" are 4-bit-per-channel buckets, and the screenshot also
     hides `.gtools`, `#glegend`, `#ghint` and `#gtip`, so only the GL canvas counts.
+- *Amended in review-cycle-1 remediation (2026-11-08), M1:* an orbit key never takes a key the
+  browser would use to scroll the inspector. Who owns ←/→ and PageUp/PageDown is decided by where
+  the user last pressed a pointer, not by `document.activeElement` (a click in the inspector's
+  text focuses nothing, so the focus test took PageUp/PageDown from a reader): a capture-phase
+  pointerdown sets `keys.rs` `INSP_KEYS` inside `#insp` and clears it inside `#v-graph`, and the
+  orbit block yields while it is set; focus inside `#insp` or an input still yields too (row D1's
+  reading, PLAN § 2.3). The row "orbit keys leave a focused inspector alone", which injected a
+  `tabIndex` the app never sets, becomes "orbit keys give the inspector its scroll keys after a
+  click in it": a mouse click on the inspector's text, then PageDown and PageUp scroll `#ibody`,
+  the four keys leave the camera alone, and a drag in the graph takes the keys back. README § Keys
+  says so.
 - **Verify:** `sh spec/graph-galaxy/verify/gate.sh P2`.
 - **Touches:** `okt-client/Cargo.toml`, `okt-client/src/graph.rs`,
   `okt-client/src/graph/{cam,gl,overlay}.rs`, `okt-client/src/keys.rs`, `okt-client/src/chrome.rs`,
