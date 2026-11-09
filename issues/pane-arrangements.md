@@ -46,7 +46,8 @@ placeable, so Files and Graph can be open at once in different panes.
 3. **The 900 px rule.** Keep it as the default for narrow windows, or retire it once arrangements are
    a choice. Lean: retire it in favour of a narrow preset.
 4. **Pane size.** Each pane reports its own size, so views fit their pane rather than the window.
-   `files-column-priority` and `graph-galaxy` both depend on it.
+   `graph-galaxy` depends on it. `files-column-priority` did too; that constraint cleared when it
+   shipped on 2026-11-08 with a container query on the Files table's own width.
 
 ## Sketch of the acceptance criteria
 
@@ -63,5 +64,6 @@ placeable, so Files and Graph can be open at once in different panes.
 
 - Proposed non-goals: the dream-inbox view and the agent chat. This cycle unblocks them; it doesn't
   build them.
-- Related: `issues/graph-galaxy.md`, `issues/files-column-priority.md`.
+- Related: `issues/graph-galaxy.md`; the Files columns by priority, shipped 2026-11-08
+  (`spec/files-column-priority/`).
 - Found by: Geoffrey, chat 2026-11-08 (story 1, KB `workspace/open-knowledge-terminal/stories.md`).

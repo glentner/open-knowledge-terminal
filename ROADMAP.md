@@ -36,22 +36,15 @@ output.
 # Part II — Views
 
 The current run, in order. Each entry is one feature cycle. Re-ordered 2026-11-08: the graph
-rebuild is on ice (below), and the two small cycles go first.
+rebuild is on ice (below), and the small cycles go first.
 
-### 2. Files columns by priority
-
-As the pane narrows, Name is crushed first. Keep Name whole up to a cap, and drop the other columns
-in a set order instead.
-
-**Seed:** [`issues/files-column-priority.md`](issues/files-column-priority.md)
-
-### 3. Compact History
+### 2. Compact History
 
 History rows are two lines tall. Make them one line under the Log's day rules.
 
 **Seed:** [`issues/history-log-rows.md`](issues/history-log-rows.md)
 
-### 4. Pane arrangements
+### 3. Pane arrangements
 
 The view pane and the inspector are fixed left and right. Make panes placeable, swappable,
 stackable and collapsible, with saved arrangements, so a third view (the dream inbox, an agent chat)
