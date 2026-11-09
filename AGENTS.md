@@ -18,6 +18,11 @@ of the Log, Table, Results and Paths views. That section writes fixtures into `$
 throwaway clone, so it runs only under `tests/env.sh` and prints a skip line anywhere else.
 `tests/ui/history.mjs` covers the inspector's History tab (its rows, day rules and widths; it
 commits a large-counts file to the clone, so it runs only under `tests/env.sh`).
+`tests/ui/panes.mjs` covers the pane arrangement, graded from rendered rects: the first-load
+layout, the title bars and tabs, the view keys and focus, dragging a split, the presets, collapse,
+the pane operations, and each view fitting its pane (its check of a commit reaching an off-screen
+Log makes an empty commit in the clone, so it runs only under `tests/env.sh` and prints a skip line
+anywhere else).
 `tests/ui/soak.mjs` checks that memory and listeners plateau on a page left open;
 `tests/perf/profile.mjs` measures main-thread cost and frame pacing, and `tests/perf/compare.py`
 compares two runs. They need Playwright (`npm install` in `tests/`).
@@ -28,8 +33,10 @@ compares two runs. They need Playwright (`npm install` in `tests/`).
   `parse.rs` (one file), `yaml.rs` (PyYAML-compatible loading), `git.rs`, `render/` (markdown,
   linkify, punycode, highlighting via okt-pygments), `http.rs` (routes, CSP, gzip), `watch.rs`,
   `pwa.rs`, `launch.rs` (editor/open/reveal), `main.rs` (CLI, detach/stop).
-- `okt-client/src`: one module per pane or concern (`graph`, `views/*`,
-  `insp`, `go`, `chrome`, `live`, `nav`, `keys`, `actions`); `js.rs` holds the JavaScript
+- `okt-client/src`: one module per view or concern (`graph`, `views/*`,
+  `insp`, `go`, `chrome`, `live`, `nav`, `keys`, `actions`); `arrange.rs` is the pane arrangement
+  (the split tree, its JSON and its operations; pure, tested natively) and `panes.rs` draws it in
+  `#panes` (title bars, the view roots moved between panes, the sash drag); `js.rs` holds the JavaScript
   semantics the output depends on (number formatting, `toFixed`, `localeCompare`, object key
   order, UTF-16 lengths); `state.rs` holds `S`, settings (localStorage `okt:<kb>`) and the boot data.
 - `okt-client/static`: the page, `app.css` (the stylesheet; the graph rules in it are

@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:pane-arrangements
 kind: feature
 appetite: big
 ---

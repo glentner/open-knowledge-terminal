@@ -1,0 +1,51 @@
+# Labels tests/ui/panes.mjs must print as "ok   <label>" (a prefix at column 0), by phase.
+# gate.sh reads lines "P<n>|<label>"; the label describes behaviour, never a spec id.
+P1|first load below 900 px starts stacked
+P1|first load at 900 px starts classic
+P1|the default arrangement is not saved by an unrelated setting
+P1|a saved splitter width sizes classic when classic starts
+P1|a saved splitter width leaves a narrow window stacked
+P1|each pane shows a title bar with its views as tabs
+P1|clicking a tab shows that view
+P1|view keys show their view in the holding pane and focus it
+P1|o c h show the Inspector on their tab and keep focus where it was
+P1|c then j still steps the Graph walk with the Graph focused
+P1|clicking in a pane focuses it and marks its title bar
+P1|a selection shows in the Inspector and every shown view follows it
+P1|back and forward restore the view by placement
+P1|a split drag follows the pointer and stops at the floor
+P1|a dragged split survives a reload within 1 px
+P2|classic matches its rects at 1600 and 900
+P2|swapped matches its rects at 1600 and 900
+P2|stacked matches its rects at 1600 and 900
+P2|three matches its rects at 1600 and 900
+P2|each preset key applies its preset and p cycles them in order
+P2|every preset survives a reload within 1 px
+P2|a window resize keeps the arrangement
+P2|three shows the Graph bar on top, the Inspector left and Files right
+P2|collapse shrinks a pane to its title bar or a strip and expand restores it
+P2|collapsing beside a collapsed pane expands that pane
+P2|the help lists the preset keys
+P3|swap exchanges the focused pane with its neighbour
+P3|flip turns a split between side by side and stacked
+P3|close gives the views to the neighbour and the neighbour takes the space
+P3|closing the only pane is refused
+P3|moving a view shows it in the neighbour
+P3|moving a pane's last view closes the pane
+P3|moving the only pane's view is refused
+P3|any view can be moved into any pane
+P3|the arrangement after operations survives a reload within 1 px
+P4|the Graph and Files render and respond side by side
+P4|the Graph canvas fills its pane after every size change
+P4|every view fits a 200 px pane without overflow
+P4|a pane under 200 px hides its body behind its title bar
+P4|the legend hides by the Graph pane's width
+P4|the Log chart fits its pane after a resize
+P5|every preset at both sizes graded from rects
+P1|a bookmarked view on a first load shows without saving the arrangement
+P1|a saved arrangement is restored untouched by the hash
+P1|a view no pane holds is added to the focused pane
+P2|a Graph moved without a resize still hit-tests where it is drawn
+P3|a drag stops where a nested split's panes reach their floor
+P4|keys act on the focused pane's view
+P4|a pane grown back over 200 px shows its view

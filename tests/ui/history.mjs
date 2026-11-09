@@ -30,7 +30,7 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 
 const OKT = process.argv[2] || process.env.OKT || 'http://127.0.0.1:6580/';
 const VIEW = { width: 1600, height: 1000 };
-const STACKED = { width: 860, height: 1000 };   // below 900px the panes stack
+const STACKED = { width: 860, height: 1000 };   // a first load below 900px starts stacked
 const NARROW = { width: 901, height: 1000 };
 
 let fails = 0;
@@ -107,30 +107,28 @@ const logReady = async page => {
   }
 };
 const close = page => page.context().close();
-// the split dragged as far right as it goes: the inspector at its narrowest
-const narrowest = async page => {
-  const s = await page.locator('#split').boundingBox();
+// the split's sash, the boundary between the panes
+const sashBox = page => page.locator('#panes .sash').first().boundingBox();
+// the split dragged so the inspector takes `share` of the width: 22% is the narrowest the old
+// splitter allowed (or the pane's 200px floor, where that is wider), 75% the widest
+const dragTo = async (page, share) => {
+  const s = await sashBox(page);
   const p = await page.locator('#panes').boundingBox();
   await page.mouse.move(s.x + s.width / 2, s.y + s.height / 2);
   await page.mouse.down();
-  await page.mouse.move(p.x + p.width - 2, s.y + s.height / 2, { steps: 8 });
+  await page.mouse.move(p.x + p.width * (1 - share), s.y + s.height / 2, { steps: 8 });
   await page.mouse.up();
   await page.waitForTimeout(500);
 };
-// the split dragged as far left as it goes: the inspector at its widest
-const widest = async page => {
-  const s = await page.locator('#split').boundingBox();
-  const p = await page.locator('#panes').boundingBox();
-  await page.mouse.move(s.x + s.width / 2, s.y + s.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(p.x + 2, s.y + s.height / 2, { steps: 8 });
-  await page.mouse.up();
-  await page.waitForTimeout(500);
-};
+// the inspector at its narrowest
+const narrowest = page => dragTo(page, 0.22);
+// the inspector at its widest
+const widest = page => dragTo(page, 0.75);
 const widths = page => page.evaluate(() => ({
   insp: document.getElementById('insp').getBoundingClientRect().width,
   panes: document.getElementById('panes').getBoundingClientRect().width,
-  stacked: getComputedStyle(document.getElementById('panes')).gridTemplateRows.split(' ').length > 1,
+  // the inspector's pane below another, not beside it
+  stacked: document.getElementById('insp').closest('.pane').getBoundingClientRect().top > document.getElementById('panes').getBoundingClientRect().top + 1,
 }));
 
 // ---- the file under test --------------------------------------------------------------------------
@@ -501,14 +499,14 @@ const sweep = async (name, hash, n, viewport) => {
   await rowsReady(p, n);
   const wide = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll('#ibody [data-commit]')]
     .map(r => [r.dataset.commit, r.querySelector('.rt').getBoundingClientRect().width])));
-  const s = await p.locator('#split').boundingBox();
+  const s = await sashBox(p);
   const pn = await p.locator('#panes').boundingBox();
   const y = s.y + s.height / 2;
   await p.mouse.move(s.x + s.width / 2, y);
   await p.mouse.down();
   const steps = [];
   let shownFor = 0;
-  // from just right of the 22% clamp (so the narrowest), leftwards, never past 75%
+  // from just right of 22% (so the narrowest: the pane's floor stops it), leftwards, never past 75%
   for (let x = pn.x + pn.width * 0.78 + 2; x > pn.x + pn.width * 0.25 && shownFor < 16; x -= 2) {
     await p.mouse.move(x, y);
     await p.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));

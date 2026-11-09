@@ -7,7 +7,8 @@
 //          n/N FIND matches, E/O/F edit/open/reveal (the request is intercepted, nothing opens)
 //   FILES columns  the Files table gives up Title, Lines, Size, Changed and Type in that order as
 //          its pane narrows, Name holding its 60-character cap while any of them shows; graded
-//          across pane widths, the splitter and stacked windows; every Name cell hovers its
+//          across pane widths set by dragging the classic split's sash, and in stacked windows;
+//          every Name cell hovers its
 //          full path; the Log, Table, Results and Paths (RECENT) rows keep the geometry their
 //          app.css tracks give them. It writes fixtures into $OKT_KB, so it runs only under
 //          tests/env.sh and prints a skip line elsewhere
@@ -49,7 +50,8 @@ const state = () => page.evaluate(() => {
   return {
     open: rows.filter(r => r.querySelector('.tw')?.textContent === '▾').map(r => r.dataset.id),
     on: rows.find(r => r.classList.contains('on'))?.dataset.id ?? null,
-    view: ['graph', 'files', 'log', 'table', 'list'].find(v => !document.getElementById('v-' + v).hidden),
+    // the view the focused pane shows
+    view: ['graph', 'files', 'log', 'table', 'list'].find(v => { const e = document.getElementById('v-' + v); return !e.hidden && !!e.closest('.pane[data-focused="1"]'); }),
     sel: decodeURIComponent((location.hash.match(/[#&]s=([^&]*)/) || [])[1] || ''),
     hint: hint && !hint.hidden ? hint.textContent : '',
     chip: document.querySelector('#ibody .nchip.kb')?.dataset.go ?? null,
@@ -198,7 +200,9 @@ const filesColumns = async () => {
   const KB = process.env.OKT_KB;
   if (!KB) { console.log('skip FILES columns: needs OKT_KB (run it inside tests/env.sh)'); return; }
   let realKB = ''; try { realKB = realpathSync(join(homedir(), 'KB')); } catch {}
-  if (realpathSync(KB) === realKB) { check('FILES columns: OKT_KB is not the real KB', false, KB); return; }
+  const throwaway = realpathSync(KB) !== realKB;
+  check('FILES columns: OKT_KB is not the real KB', throwaway, KB);
+  if (!throwaway) return;
   // Fixtures: a titled file and a folder whose Name texts are 60 characters, a title-less file,
   // and a long titled file one level down (a nested row). Untracked, so they show as uncommitted.
   const pad = (stem, n, tail = '') => (stem + '-abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz').slice(0, n - tail.length) + tail;
@@ -225,14 +229,20 @@ const filesColumns = async () => {
 
   const DROP = ['ti', 'lines', 'size', 'age', 'ty'];   // the order the droppable columns give way
   const ALL = ['nm', ...DROP, 'st'];
-  const page = await (await browser.newContext({ viewport: { width: 1600, height: 1000 } })).newPage();
-  const before = errors.length;               // this page's errors join the suite's
-  page.on('pageerror', e => errors.push(e.message));
-  await page.goto(OKT + '#v=files&s=' + encodeURIComponent(`${DIR}/${NEST}`), { waitUntil: 'load' });
-  await page.waitForTimeout(2000);
+  const before = errors.length;               // these pages' errors join the suite's
+  // A fresh context per window: an empty store, so the window's width picks the arrangement
+  // (classic from 900px, stacked below), with Files placed where the hash says.
+  const openFiles = async width => {
+    const p = await (await browser.newContext({ viewport: { width, height: 1000 } })).newPage();
+    p.on('pageerror', e => errors.push(e.message));
+    await p.goto(OKT + '#v=files&s=' + encodeURIComponent(`${DIR}/${NEST}`), { waitUntil: 'load' });
+    await p.waitForTimeout(2000);
+    await install(p);
+    return p;
+  };
 
   // Everything the checks read, in one synchronous pass over the live layout.
-  await page.evaluate(([LONG, BARE, DIR, NEST, ALL, DIR_ID]) => {
+  const install = p => p.evaluate(([LONG, BARE, DIR, NEST, ALL, DIR_ID]) => {
     const tree = document.getElementById('tree');
     const row = id => [...tree.querySelectorAll('.trow')].find(r => r.dataset.id === id);
     const textWidth = (el, from = 0, to) => { const r = document.createRange(); const t = el.firstChild; r.setStart(t, from); r.setEnd(t, to ?? t.length); return r.getBoundingClientRect().width; };
@@ -268,14 +278,30 @@ const filesColumns = async () => {
         }
         return out;
       },
-      // the Files pane at an exact width, through the same custom property the splitter sets
-      pane(x) { document.getElementById('panes').style.setProperty('--insp-w', `calc(100% - 5px - ${x}px)`); return this.read(); },
+      // the Files pane's width once a sash move has been drawn (at most a few frames)
+      async at(x) {
+        const w = () => document.getElementById('v-files').getBoundingClientRect().width;
+        for (let i = 0; i < 10 && Math.abs(w() - x) > 0.01; i++) await new Promise(r => requestAnimationFrame(r));
+        return this.read();
+      },
     };
   }, [LONG, BARE, DIR, NEST, ALL, DIR_ID]);
+  const page = await openFiles(1600);
+
+  // The Files pane at an exact width: the classic split's sash held and moved so its boundary is
+  // x px from the left (the pane's width, which is the left side's share of the split).
+  const sashOf = async () => page.evaluate(() => {
+    const s = [...document.querySelectorAll('#panes .sash')].find(e => e.checkVisibility());
+    const r = s.getBoundingClientRect(), p = document.getElementById('panes').getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + 200, left: p.left };
+  });
+  const hold = async () => { const s = await sashOf(); await page.mouse.move(s.x, s.y); await page.mouse.down(); return s; };
+  const moveTo = async (s, x) => { await page.mouse.move(s.left + x, s.y); return page.evaluate(x => window.__cols.at(x), x); };
+  const paneTo = async x => { const s = await hold(); const L = await moveTo(s, x); await page.mouse.up(); await page.waitForTimeout(50); return L; };
 
   const shownSet = L => DROP.filter(c => L.rows.head.cells[c].state === 'shown');
   // The 60-character Name text and the width it needs, measured at a wide pane.
-  const wide = await page.evaluate(() => window.__cols.pane(1300));
+  const wide = await paneTo(1300);
   const rendered = ['long', 'bare', 'dir', 'nest'].every(k => wide.rows[k]);
   check('FILES columns: the fixture rows render', rendered, Object.keys(wide.rows).filter(k => !wide.rows[k]));
   if (!rendered) return;
@@ -320,8 +346,15 @@ const filesColumns = async () => {
   };
   const ordered = set => DROP.every((c, i) => !set.includes(c) || DROP.slice(i + 1).every(d => set.includes(d)));
 
-  // ---- the sweep: narrow the pane 1300 -> 380 and widen it back, 2px at a time
-  const sweep = async () => page.evaluate(() => { const o = []; for (let x = 1300; x >= 380; x -= 2) o.push(window.__cols.pane(x)); for (let x = 380; x <= 1300; x += 2) o.push(window.__cols.pane(x)); return o; });
+  // ---- the sweep: narrow the pane 1300 -> 380 and widen it back, 2px at a time, in one held drag
+  const sweep = async () => {
+    const s = await hold();
+    const o = [];
+    for (let x = 1300; x >= 380; x -= 2) o.push(await moveTo(s, x));
+    for (let x = 380; x <= 1300; x += 2) o.push(await moveTo(s, x));
+    await page.mouse.up();
+    return o;
+  };
   // the pane width (or the table's inner width) at which each column first gives way
   const transitions = (Ls, k = 'pane') => { const t = {}; let prev = null; for (const L of Ls) { const s = shownSet(L); if (prev) for (const c of DROP) if (prev.includes(c) && !s.includes(c)) (t[c] ??= L[k]); prev = s; } return t; };
   const down = await sweep();
@@ -386,14 +419,11 @@ const filesColumns = async () => {
   }
 
   // ---- the three pane widths, set with the splitter in a 1600px window
-  await page.evaluate(() => document.getElementById('panes').style.removeProperty('--insp-w'));
   const drag = async target => {
-    const sp = await page.locator('#split').boundingBox();
-    const pr = await page.evaluate(() => { const r = document.getElementById('panes').getBoundingClientRect(); return { right: r.right, width: r.width }; });
-    const x = pr.right - (pr.width - 5 - target);
-    await page.mouse.move(sp.x + sp.width / 2, sp.y + 200);
+    const s = await sashOf();
+    await page.mouse.move(s.x, s.y);
     await page.mouse.down();
-    await page.mouse.move(x, sp.y + 200, { steps: 8 });
+    await page.mouse.move(s.left + target, s.y, { steps: 8 });
     await page.mouse.up();
     await page.waitForTimeout(150);
     return page.evaluate(() => window.__cols.read());
@@ -430,14 +460,16 @@ const filesColumns = async () => {
   }
 
   // ---- the same pane widths in a window narrow enough to stack the panes
-  // Every stacked window from 900px (the widest that stacks) down to 380, 4px a step, against the
-  // side-by-side sweep at the same inner width; and 760 and 480 against the splitter's.
+  // A window first loaded below 900px starts stacked, and keeps it as the window resizes. Every
+  // stacked window from 900px down to 380, 4px a step, against the side-by-side sweep at the same
+  // inner width; and 760 and 480 against the splitter's.
   const side = new Map(down.slice(0, half).map(L => [L.content, shownSet(L).join()]));
   const stackBad = [];
+  const narrow = await openFiles(899);
   for (let w = 900; w >= 380; w -= 4) {
-    await page.setViewportSize({ width: w, height: 1000 });
-    const L = await page.evaluate(() => window.__cols.read());
-    const stacked = await page.evaluate(() => document.getElementById('insp').getBoundingClientRect().top >= document.getElementById('view').getBoundingClientRect().bottom - 1);
+    await narrow.setViewportSize({ width: w, height: 1000 });
+    const L = await narrow.evaluate(() => window.__cols.read());
+    const stacked = await narrow.evaluate(() => document.getElementById('insp').getBoundingClientRect().top >= document.getElementById('v-files').closest('.pane').getBoundingClientRect().bottom - 1);
     const g = grade(L);
     if (!stacked || Math.abs(L.pane - w) > 1) stackBad.push({ w, stacked, pane: L.pane });
     else if (!g.ok) stackBad.push({ w, bad: g.bad.slice(0, 4) });
@@ -445,12 +477,11 @@ const filesColumns = async () => {
     if (w === 760 || w === 480) check(`a ${w}px stacked pane shows what a ${w}px pane beside the inspector shows`, g.ok && g.set.join() === R[w].join(), { stacked: g.set, side: R[w], bad: g.bad.slice(0, 4) });
   }
   check('stacked windows 900 -> 380px lay out cleanly and match a side-by-side pane of the same width', stackBad.length === 0, stackBad.slice(0, 4));
-  await page.setViewportSize({ width: 1600, height: 1000 });
-  await page.waitForTimeout(300);
+  await narrow.context().close();
 
   // ---- hover: the full path on every Name cell, cut or not
   for (const x of [1200, 480]) {
-    await page.evaluate(x => window.__cols.pane(x), x);
+    await paneTo(x);
     for (const id of [LONG, BARE, DIR_ID, `${DIR}/${NEST}`]) {
       const tips = await page.evaluate(id => {
         const r = [...document.querySelectorAll('#tree .trow')].find(r => r.dataset.id === id);
@@ -468,13 +499,18 @@ const filesColumns = async () => {
   }
 
   // ---- a wide pane is as today: Name and Title split 1 : 0.9; the header stays on top
-  const W = await page.evaluate(() => window.__cols.pane(1540));
+  // (a window wide enough for a 1540px pane beside the Inspector's 200px floor)
+  await page.setViewportSize({ width: 1800, height: 1000 });
+  await page.waitForTimeout(300);
+  const W = await paneTo(1540);
   const ratio = W.rows.head.cells.nm.w / W.rows.head.cells.ti.w;
   check('a 1540px pane splits Name and Title as today (1 : 0.9)', Math.abs(ratio - 1 / 0.9) < 0.01, { nm: W.rows.head.cells.nm.w, ti: W.rows.head.cells.ti.w });
   const sticky = await page.evaluate(() => { const t = document.getElementById('tree'); t.scrollTop = 400; const d = t.querySelector('.thead').getBoundingClientRect().top - t.getBoundingClientRect().top; t.scrollTop = 0; return d; });
   check('the header stays at the top while the table scrolls', Math.abs(sticky) < 0.5, sticky);
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.waitForTimeout(300);
   for (const x of [1200, 480]) {
-    await page.evaluate(x => window.__cols.pane(x), x);
+    await paneTo(x);
     const st = await page.evaluate(LONG => { const s = [...document.querySelectorAll('#tree .trow')].find(r => r.dataset.id === LONG).querySelector('.st'); return { text: s.textContent, title: s.title, w: s.getBoundingClientRect().width }; }, LONG);
     check(`${x}px: an uncommitted file shows its marker and "uncommitted"`, st.text.length > 0 && st.title === 'uncommitted' && st.w > 0, st);
   }
@@ -487,6 +523,8 @@ const filesColumns = async () => {
   // ends at the padding. The Table is an HTML table: every row's cells line up under the header,
   // the table spans the pane, and each cell's text sits `inset` from its edge. These values restate
   // app.css: change a track there and its row here in the same commit (AGENTS.md § Conventions).
+  // Under 360 px of its pane the Log keeps only its first, second and fourth tracks; panes.mjs
+  // grades that pane at 200 px.
   const VIEWS = [
     { name: 'Log', view: 'log', open: '#v=log', rows: '#ltable .crow', tracks: [64, null, null, 'fr', 40, 96], gap: 10, pad: 10, border: 2, height: 21 },
     { name: 'Results', view: 'list', open: '#v=list&q=plain', title: 'FIND plain', rows: '#list .lrow', tracks: [48, 'fr'], gap: 10, pad: 10, border: 0 },
@@ -533,7 +571,7 @@ const filesColumns = async () => {
     return { ...out, bad };
   }, V);
   for (const x of [1200, 480]) {
-    await page.evaluate(x => document.getElementById('panes').style.setProperty('--insp-w', `calc(100% - 5px - ${x}px)`), x);
+    await paneTo(x);
     for (const V of VIEWS) {
       if (V.open.startsWith('#')) await page.evaluate(h => { location.hash = h; }, V.open);
       else { await page.fill('#go', V.open); await page.press('#go', 'Enter'); }

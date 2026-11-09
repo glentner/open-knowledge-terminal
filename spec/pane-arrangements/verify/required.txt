@@ -1,0 +1,24 @@
+# Native tests (cargo test -p okt-client -- --exact) each phase requires, as "P<n>|<path>".
+P1|arrange::tests::json_round_trip_keeps_the_tree
+P1|arrange::tests::sanitise_drops_unknown_and_duplicate_views
+P1|arrange::tests::sanitise_rebuilds_a_broken_tree
+P1|arrange::tests::default_is_stacked_below_900_and_classic_from_900
+P1|arrange::tests::legacy_insp_sizes_classic_only
+P1|arrange::tests::drag_stops_at_the_floor
+P1|arrange::tests::place_finds_the_holder_or_adds_to_the_focused_pane
+P1|state::tests::arrangement_is_written_only_once_chosen
+P2|arrange::tests::presets_hold_every_view_once
+P2|arrange::tests::preset_sizes_match_the_plan
+P2|arrange::tests::collapse_keeps_the_share_and_expand_restores_it
+P2|arrange::tests::collapsing_beside_a_collapsed_leaf_expands_it
+P2|arrange::tests::the_only_pane_does_not_collapse
+P3|arrange::tests::neighbour_shares_an_edge
+P3|arrange::tests::swap_exchanges_contents_in_place
+P3|arrange::tests::flip_toggles_the_parent_split
+P3|arrange::tests::close_gives_views_to_the_neighbour
+P3|arrange::tests::close_refuses_the_only_pane
+P3|arrange::tests::moving_the_last_view_closes_the_source
+P3|arrange::tests::moving_the_only_view_is_refused
+P1|arrange::tests::drag_floor_counts_nested_panes
+P2|arrange::tests::collapse_keeps_focus_on_the_pane
+P1|arrange::tests::showing_the_inspector_keeps_focus

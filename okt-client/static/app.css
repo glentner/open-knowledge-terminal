@@ -143,24 +143,81 @@ a { color: inherit; }
 .fk:hover { color: var(--ink); }
 .fk.on { color: var(--ink); border-bottom-color: var(--accent); }
 .fk.on kbd { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+/* the presets: a click applies one, and the one the arrangement equals is marked */
+.presets { display: flex; align-items: stretch; gap: 2px; min-width: 0; overflow: hidden; }
+.pre { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; color: var(--ink-2); font-size: 11px; letter-spacing: .08em; white-space: nowrap; border-bottom: 2px solid transparent; }
+.pre kbd { background: var(--bg-4); color: var(--accent-text); border: 1px solid var(--line-2); padding: 0 4px; font-size: 10.5px; line-height: 15px; min-width: 16px; text-align: center; }
+.pre:hover { color: var(--ink); }
+.pre.on { color: var(--ink); border-bottom-color: var(--accent); }
 .crumbs { margin-left: auto; display: flex; align-items: center; gap: 4px; color: var(--dim); font-size: 11.5px; min-width: 0; overflow: hidden; white-space: nowrap; }
 .crumbs button { color: var(--ink-2); }
 .crumbs button:hover { color: var(--accent-text); }
 .crumbs .sep { color: var(--faint); }
 
 /* ---------- panes ---------- */
-.panes { display: grid; grid-template-columns: minmax(0, 1fr) 5px var(--insp-w, 46%); min-height: 0; }
-.view { position: relative; min-width: 0; min-height: 0; background: var(--bg); }
+/* The arrangement: a tree of splits (.psplit, side by side or stacked) whose leaves are panes
+   (.pane: a title bar of tabs over a body holding view roots). A split's two children tile it
+   exactly, each with its own inline flex from the split's share, so no share is inherited by a
+   nested split; the boundary is a 1px rule drawn over the second child's leading edge (a border
+   would take its pixel out of the shares), and the .sash over it is the 5px handle. Views no pane
+   holds wait in #parking. */
+.panes { display: flex; min-width: 0; min-height: 0; }
+.panes > .psplit, .panes > .pane { flex: 1 1 0px; }
+.psplit { position: relative; display: flex; min-width: 0; min-height: 0; }
+.psplit[data-orient="col"] { flex-direction: column; }
+.psplit > .pane, .psplit > .psplit { min-width: 0; min-height: 0; }
+.psplit > :nth-child(3)::before { content: ""; position: absolute; z-index: 25; pointer-events: none; }
+.psplit[data-orient="row"] > :nth-child(3)::before { left: 0; top: 0; bottom: 0; width: 1px; background: var(--line); }
+.psplit[data-orient="col"] > :nth-child(3)::before { left: 0; right: 0; top: 0; height: 1px; background: var(--line-2); }
+.sash { position: absolute; z-index: 30; touch-action: none; }
+.psplit[data-orient="row"] > .sash { top: 0; bottom: 0; width: 5px; left: calc(var(--f) * 100% - 2.5px); cursor: col-resize; }
+.psplit[data-orient="col"] > .sash { left: 0; right: 0; height: 5px; top: calc(var(--f) * 100% - 2.5px); cursor: row-resize; }
+.sash:hover, .sash.drag { background: var(--accent-dim); }
+.pane { position: relative; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+.ptitle { flex: none; height: 24px; display: flex; align-items: stretch; gap: 2px; padding: 0 4px; min-width: 0; overflow: hidden; background: var(--bg-2); border-bottom: 1px solid var(--line); }
+.pane[data-focused="1"] > .ptitle { background: var(--bg-4); box-shadow: inset 0 2px 0 var(--accent); }
+/* tabs shrink to fit: the label ends in "…", the key hint stays */
+.ptab { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px 0 2px; color: var(--ink-2); font-size: 11px; letter-spacing: .08em; white-space: nowrap; overflow: hidden; border-bottom: 2px solid transparent; }
+.ptab kbd { flex: none; background: var(--bg-4); color: var(--accent-text); border: 1px solid var(--line-2); padding: 0 4px; font-size: 10.5px; line-height: 15px; min-width: 16px; text-align: center; }
+.ptab span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ptab:hover { color: var(--ink); }
+.ptab.on { color: var(--ink); border-bottom-color: var(--accent); }
+.ptab.on kbd { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.pbody { flex: 1 1 0px; position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+/* Each pane is a size container, and its views fit the pane, not the window, down to 200px wide
+   (the side-by-side drag floor, arrange.rs MIN_W). A narrower pane, which only a shrinking window
+   makes, keeps its title bar, its tabs down to their keys, and hides its body; panes.rs counts its
+   view as off screen below the same width. Under 300px a tab shows only its key, and the view bars
+   drop their counts under 360px. */
+section.pane { container: pane / size; }
+@container pane (width < 300px) {
+  .pane:not(.collapsed) > .ptitle > .ptab > span, .itabs button > span { display: none; }
+  .pane:not(.collapsed) > .ptitle > .ptab { padding: 0 4px 0 2px; }
+}
+@container pane (width < 200px) {
+  .pbody { display: none; }
+  .pane:not(.collapsed) > .ptitle { padding: 0 1px; gap: 1px; }
+  .pane:not(.collapsed) > .ptitle > .ptab { flex: 0 1 auto; padding: 0; }
+  .pane:not(.collapsed) > .ptitle > .ptab > kbd { flex: 0 1 auto; min-width: 0; padding: 0 2px; overflow: hidden; }
+}
+/* a collapsed pane is its title bar: across the top in a stack, or side by side a 24px strip
+   whose tabs read down it; which one follows the split it sits in, so a flip turns one into the
+   other */
+.pane.collapsed > .pbody { display: none; }
+.psplit[data-orient="row"] > .pane.collapsed > .ptitle { writing-mode: vertical-rl; flex: 1 1 0px; height: auto; width: 24px; min-height: 0; padding: 4px 0; border-bottom: 0; }
+.psplit[data-orient="row"] > .pane.collapsed > .ptitle > .ptab { min-height: 0; padding: 2px 0 8px; }
 .vpane { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; }
-.split { background: var(--bg-2); border-left: 1px solid var(--line); border-right: 1px solid var(--line); cursor: col-resize; }
-.split:hover, .split.drag { background: var(--accent-dim); }
-.insp { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-2); }
+.insp { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-2); }
 .vhead { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--bg-2); flex: none; min-width: 0; }
-.vt { color: var(--accent-text); font-weight: 700; letter-spacing: .12em; font-size: 11px; }
-.vhead input { flex: 1; min-width: 80px; max-width: 420px; height: 22px; background: var(--bg); border: 1px solid var(--line-2); padding: 0 8px; outline: 0; }
+.vt { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent-text); font-weight: 700; letter-spacing: .12em; font-size: 11px; }
+.vhead input { flex: 1; min-width: 0; max-width: 420px; height: 22px; background: var(--bg); border: 1px solid var(--line-2); padding: 0 8px; outline: 0; }
 .vhead input:focus { border-color: var(--accent); }
-.vmeta { color: var(--dim); font-size: 11px; white-space: nowrap; margin-left: auto; }
-.mini { border: 1px solid var(--line-2); padding: 1px 7px; font-size: 10.5px; letter-spacing: .08em; color: var(--ink-2); }
+.vmeta { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--dim); font-size: 11px; white-space: nowrap; margin-left: auto; }
+@container pane (width < 360px) {
+  .vhead { gap: 8px; }
+  .vhead .vmeta, .vhead .tfold { display: none; }
+}
+.mini { flex: none; border: 1px solid var(--line-2); padding: 1px 7px; font-size: 10.5px; letter-spacing: .08em; color: var(--ink-2); }
 .mini:hover, .mini.on { border-color: var(--accent); color: var(--accent-text); }
 
 /* ---------- graph ---------- */
@@ -175,7 +232,9 @@ a { color: inherit; }
 .glegend { position: absolute; left: 10px; bottom: 10px; display: flex; flex-wrap: wrap; gap: 3px 12px; width: fit-content; max-width: calc(100% - 20px); font-size: 10.5px; color: var(--dim); pointer-events: none; background: color-mix(in oklab, var(--graph-bg) 84%, transparent); padding: 4px 8px; border: 1px solid var(--line); }
 .glegend span { display: inline-flex; align-items: center; gap: 5px; }
 .glegend svg { flex: none; }
-.gtip { position: absolute; pointer-events: none; z-index: 20; background: var(--bg-2); border: 1px solid var(--accent); padding: 6px 9px; max-width: 360px; box-shadow: 0 8px 20px rgba(0,0,0,.35); font-size: 11.5px; }
+/* under 480px of its pane the legend would need a fourth row */
+@container pane (width < 480px) { .glegend { display: none; } }
+.gtip { position: absolute; pointer-events: none; z-index: 20; background: var(--bg-2); border: 1px solid var(--accent); padding: 6px 9px; max-width: min(300px, calc(100% - 8px)); overflow-wrap: anywhere; box-shadow: 0 8px 20px rgba(0,0,0,.35); font-size: 11.5px; }
 .gtip b { color: var(--ink); display: block; font-weight: 600; }
 .gtip .p { color: var(--accent-text); }
 .gtip .m { color: var(--dim); }
@@ -301,11 +360,18 @@ a { color: inherit; }
 .crow .ad { text-align: right; font-variant-numeric: tabular-nums; }
 .crow .ad .a, .plus { color: var(--up); }
 .crow .ad .d, .minus { color: var(--down); }
+/* a narrow Log pane keeps the hash, the time and the subject (graded by tests/ui/panes.mjs at
+   200px; the full tracks above by keys.mjs) */
+@container pane (width < 360px) {
+  .crow { grid-template-columns: 64px minmax(0, max-content) minmax(0, 1fr); }
+  .crow .dt { overflow: hidden; text-overflow: ellipsis; }
+  .crow .px, .crow .nf, .crow .ad { display: none; }
+}
 .dayrule { position: sticky; top: 0; padding: 2px 10px; background: var(--bg-3); color: var(--accent-text); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; border-bottom: 1px solid var(--line); z-index: 1; }
 
 /* ---------- table (screener) ---------- */
 /* Its row tracks are pinned in tests/ui/keys.mjs (AGENTS.md § Conventions). */
-.tfold { color: var(--ink); }
+.tfold { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
 .tgrid table { border-collapse: separate; border-spacing: 0; min-width: 100%; font-variant-numeric: tabular-nums; }
 .tgrid th { position: sticky; top: 0; z-index: 2; background: var(--bg-2); color: var(--dim); font-weight: 500; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; text-align: left; padding: 4px 10px; border-bottom: 1px solid var(--line-2); white-space: nowrap; cursor: pointer; user-select: none; }
 .tgrid th:hover { color: var(--ink); }
@@ -325,8 +391,8 @@ a { color: inherit; }
 /* Its row tracks are pinned in tests/ui/keys.mjs (AGENTS.md § Conventions). */
 .lgroup { border-bottom: 1px solid var(--line); }
 .lgh { display: flex; gap: 10px; align-items: baseline; padding: 4px 10px; background: var(--bg-2); position: sticky; top: 0; z-index: 1; cursor: pointer; }
-.lgh .p { color: var(--ink); }
-.lgh .c { color: var(--dim); margin-left: auto; font-size: 11px; }
+.lgh .p { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.lgh .c { flex: none; color: var(--dim); margin-left: auto; font-size: 11px; }
 .lrow { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 10px; padding: 1px 10px; cursor: pointer; white-space: nowrap; }
 .lrow:hover { background: var(--bg-3); }
 .lrow .ln { color: var(--faint); text-align: right; font-variant-numeric: tabular-nums; }
@@ -344,16 +410,17 @@ a { color: inherit; }
 .ipath button:hover { color: var(--accent-text); }
 .ititle { font-size: 15px; font-weight: 700; color: var(--ink); margin: 2px 0 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ibadges { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.badge { border: 1px solid var(--line-2); padding: 0 5px; font-size: 10.5px; color: var(--ink-2); line-height: 17px; display: inline-flex; align-items: center; gap: 5px; }
+.badge { max-width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line-2); padding: 0 5px; font-size: 10.5px; color: var(--ink-2); line-height: 17px; display: inline-flex; align-items: center; gap: 5px; }
 .badge.fam i { width: 8px; height: 8px; display: inline-block; }
 .badge.warn { color: var(--warn); border-color: var(--warn); }
 .badge.acc { color: var(--accent-text); border-color: var(--accent); }
-.iacts { display: flex; gap: 4px; margin-left: auto; }
+.iacts { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; min-width: 0; }
 .act { border: 1px solid var(--line-2); padding: 0 6px; font-size: 10.5px; letter-spacing: .06em; line-height: 17px; color: var(--ink-2); }
 .act:hover { border-color: var(--accent); color: var(--accent-text); }
-.itabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line); flex: none; }
-.itabs button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 5px 2px; color: var(--ink-2); font-size: 11.5px; letter-spacing: .08em; border-bottom: 2px solid transparent; }
-.itabs kbd { background: var(--bg-4); color: var(--accent-text); border: 1px solid var(--line-2); padding: 0 4px; font-size: 10.5px; line-height: 16px; }
+.itabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line); flex: none; min-width: 0; }
+.itabs button { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 5px 2px; color: var(--ink-2); font-size: 11.5px; letter-spacing: .08em; border-bottom: 2px solid transparent; }
+.itabs button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.itabs kbd { flex: none; background: var(--bg-4); color: var(--accent-text); border: 1px solid var(--line-2); padding: 0 4px; font-size: 10.5px; line-height: 16px; }
 .itabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
 .itabs button.on kbd { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .itabs .cnt { color: var(--dim); }
@@ -420,6 +487,16 @@ a { color: inherit; }
   .hrow.hl .rt { width: auto; }
   .hrow.hl .ad { display: none; }
 }
+/* the Overview's Last commit (.last, the plain .hrow) in a narrow Inspector: the hash and the time
+   on one line, the subject and the counts under them, so it fits #ibody down to a 200px pane with
+   counts of 14 characters; from 360px of #ibody it is the one-line row above */
+@container (width < 360px) {
+  .hrow.last { grid-template-columns: 64px minmax(0, 1fr) max-content; row-gap: 2px; }
+  .hrow.last .dt { grid-column: 2 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hrow.last .st { display: none; }
+  .hrow.last .sj { grid-column: 1 / 3; }
+  .hrow.last .rt { grid-column: 3; }
+}
 
 /* content toolbar */
 .ctool { position: sticky; top: 0; z-index: 3; display: flex; gap: 6px; align-items: center; padding: 5px 12px; background: var(--bg-2); border-bottom: 1px solid var(--line); }
@@ -427,6 +504,13 @@ a { color: inherit; }
 .ctool .seg button { padding: 0 8px; font-size: 10.5px; letter-spacing: .08em; line-height: 18px; color: var(--ink-2); }
 .ctool .seg button.on { background: var(--accent); color: var(--accent-ink); }
 .ctool .info { color: var(--dim); font-size: 11px; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* in a narrow Inspector the toolbar tightens, then its buttons and the blame legend give way, cut
+   with "…", before it would spill past #ibody */
+@container (width < 360px) {
+  .ctool { gap: 4px; padding: 5px 8px; }
+  .ctool .seg, .ctool .bleg { min-width: 0; overflow: hidden; }
+  .ctool .seg button { min-width: 0; padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
 .travel { display: flex; gap: 8px; align-items: center; padding: 5px 12px; background: var(--accent); color: var(--accent-ink); font-weight: 600; position: sticky; top: 29px; z-index: 3; font-size: 11.5px; }
 .travel .tt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .travel .tt i { font-weight: 400; }
@@ -434,6 +518,13 @@ a { color: inherit; }
 .travel button:hover:not(:disabled) { background: var(--accent-ink); color: var(--accent); }
 .travel button:disabled { opacity: .35; cursor: default; }
 .travel button.lv { margin-left: 4px; }
+/* in a narrow Inspector the time-travel bar tightens, then its buttons give way, cut with "…",
+   before it would spill past #ibody */
+@container (width < 360px) {
+  .travel { gap: 4px; padding: 5px 8px; }
+  .travel button { min-width: 0; padding: 0 4px; overflow: hidden; text-overflow: ellipsis; }
+  .travel button.lv { margin-left: 0; }
+}
 
 /* source + blame */
 .src { font-family: var(--mono); font-size: 12px; line-height: 1.5; padding: 6px 0 40px; counter-reset: ln; }
@@ -447,6 +538,15 @@ a { color: inherit; }
 .src .bl i { width: 3px; flex: none; align-self: stretch; }
 .src .bl.cont b, .src .bl.cont span { visibility: hidden; }
 .src.blame { --gut: 210px; }
+/* in a narrow Inspector the blame gutter gives way to the code: it shrinks with #ibody (100cqi),
+   down to its age bar and the date's first letters, and the line numbers tighten, so the code
+   column keeps about 140px from 200px up; from 400px the gutter is its full 210px */
+@container (width < 400px) {
+  .src .l { grid-template-columns: var(--gut, 0px) 36px minmax(0, 1fr); }
+  .src .no { padding-right: 6px; }
+  .src.blame { --gut: clamp(12px, 100cqi - 190px, 210px); }
+  .src.blame .bl { gap: 4px; padding: 0 4px 0 2px; }
+}
 .md.blame { position: relative; padding-left: 34px; }
 .md .bgut { position: absolute; left: 14px; top: 0; width: 5px; }
 .md .bgut i { position: absolute; left: 0; width: 4px; cursor: pointer; }
@@ -607,10 +707,6 @@ a { color: inherit; }
 .helpbox .full { grid-column: 1 / -1; color: var(--dim); }
 
 @media (max-width: 900px) {
-  .panes { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
-  .split { display: none; }
-  .insp { border-top: 1px solid var(--line-2); }
-  .glegend { display: none; }
   .word, .kbname, .crumbs { display: none; }
 }
 

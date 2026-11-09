@@ -51,7 +51,7 @@ Useful flags: `--theme terminal|dark|light`, `--accent '#ffa028'`, `--font "Berk
 | `okt-pygments/` | Syntax highlighting that reproduces Pygments' HTML output exactly (lexer tables exported from Pygments by `tools/pygments/export.py`, run by a Rust port of Pygments' lexer engine). |
 | `vendor/markdown-it/` | markdown-it 0.6.1 with one fix (emphasis source maps across stripped line prefixes); see `Cargo.toml` `[patch.crates-io]`. |
 | `tests/env.sh` | A throwaway okt server on 6581 over a fresh clone of the KB, to run the browser tests against. |
-| `tests/ui/` | Browser tests: the navigation keys (see Keys), the Files columns, the inspector's History tab, and a soak test for a page left open all day. |
+| `tests/ui/` | Browser tests: the navigation keys (see Keys), the Files columns, the inspector's History tab, the pane arrangement, and a soak test for a page left open all day. |
 | `tests/perf/` | Main-thread cost and frame pacing of a fixed set of interactions, compared across two builds. |
 
 ## Tests
@@ -60,6 +60,7 @@ Useful flags: `--theme terminal|dark|light`, `--accent '#ffa028'`, `--font "Berk
 make test                                                   # unit tests
 tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/keys.mjs"'     # the navigation keys, the Files columns
 tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/history.mjs"'  # the History tab
+tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/panes.mjs"'    # the pane arrangement
 tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/soak.mjs" "$OKT_KB" "$OKT"'
 ```
 
@@ -71,6 +72,12 @@ and the okt on 6580 are never touched. The browser tests need Playwright (`npm i
 priority as its pane narrows, the full path on hover over a Name, and the row geometry of the Log,
 Table, Results and Paths views. The Files columns section writes fixture files into the KB it
 serves (`$OKT_KB`), so it runs only under `tests/env.sh`; anywhere else it prints a skip line.
+`panes.mjs` grades the pane arrangement from what renders (each pane's rect, its title bar and
+tabs, the view it shows, which pane is focused): the first-load layout, the view keys, focus,
+dragging a split, the presets, collapse, the pane operations, and each view fitting its pane (the
+Graph and Files side by side, every view in a 200 px pane, the legend by its pane's width). Its
+check of a commit reaching an off-screen Log makes an empty commit in `$OKT_KB`, so it runs only
+under `tests/env.sh`; anywhere else it prints a skip line.
 
 End-to-end tests of the JSON API, raw files, the watcher and the rendered panes are not written
 yet; `ROADMAP.md` tracks them.
@@ -86,6 +93,17 @@ yet; `ROADMAP.md` tracks them.
   (a dashed ring, the card and the hint show where), Enter or space goes there, esc stops; with no
   walk, space opens or closes the selected folder and Enter shows a file's content; `z` zooms to
   the selection and its neighbors.
+- PANES: the views sit in panes, each a title bar of tabs; a click in a pane focuses it, and the
+  view keys act on the focused pane's view. `g`/`f`/`l`/`t` show their view in the pane that holds
+  it (expanding it) and focus that pane; `o`/`c`/`h` show the Inspector and leave focus where it
+  is. The presets: `;` classic (views left, Inspector right), `'` swapped, `\` stacked (views on
+  top), `` ` `` three (the Graph's title bar on top, the Inspector left, Files right); `p` cycles
+  them in that order. `w` then a key acts on the focused pane: `w w`/`w W` focus the next or
+  previous pane; `w d` collapses it to its title bar, or a strip side by side, and expands it
+  again; `w x` swaps it with its neighbour, each keeping its views; `w r` turns its split between
+  side by side and stacked; `w q` closes it, its views going to the neighbour, which takes the
+  space; `w v`/`w V` move its shown view to the neighbour, and moving its last view closes it. The
+  only pane can't be closed, collapsed or emptied. The arrangement you leave is kept per KB.
 - Anywhere: `J`/`K` scroll the inspector, `s` switches between source and rendered, `y` copies the
   path, `m` pins the selection and `1`–`9` go to the pins (kept per KB), `n`/`N` step through FIND
   matches and on into the next or previous result file, and `E`/`O`/`F` edit, open and reveal, as

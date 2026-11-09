@@ -268,7 +268,7 @@ pub fn render() {
         dom::set_html(
             &b,
             &format!(
-                "<kbd>H</kbd>HISTORY{}",
+                "<kbd>H</kbd><span>HISTORY{}</span>",
                 match hist_n {
                     Some(h) if h != 0.0 => format!(" <span class=\"cnt\">{}</span>", num(h)),
                     _ => String::new(),
@@ -772,7 +772,7 @@ async fn overview(idx: &Idx, n: &Node) -> Result<String, String> {
     );
     if let Some(last) = &git.last {
         html.push_str(&format!(
-            "<div class=\"sect\"><div class=\"sh\">Last commit</div><button class=\"hrow\" data-commit=\"{}\" style=\"padding-left:0\"><span class=\"h\">{}</span><span class=\"dt\">{}</span><span class=\"st\"></span><span class=\"sj\">{}</span><span class=\"rt\"><span class=\"plus\">+{}</span> <span class=\"minus\">−{}</span></span></button></div>",
+            "<div class=\"sect\"><div class=\"sh\">Last commit</div><button class=\"hrow last\" data-commit=\"{}\" style=\"padding-left:0\"><span class=\"h\">{}</span><span class=\"dt\">{}</span><span class=\"st\"></span><span class=\"sj\">{}</span><span class=\"rt\"><span class=\"plus\">+{}</span> <span class=\"minus\">−{}</span></span></button></div>",
             last.h,
             short(&last.h),
             fmt::dt(last.t),
@@ -1973,14 +1973,14 @@ fn hrow(c: &Commit, n: Option<&Node>) -> String {
 
 // ---- commit detail ---------------------------------------------------------------------------
 
-/// `openCommit(h)`
+/// `openCommit(h)`. The Log's row for the commit is marked whether or not the Log is on screen: its
+/// keys step from the marked row, and they reach it off screen too (its pane collapsed, or its slot
+/// showing the Inspector), so the mark is the Log's position wherever the Log is.
 pub fn open_commit(h: &str) {
     s_mut().commit = Some(h.to_string());
-    if s().view == "log" {
-        for r in dom::qa("#ltable .crow") {
-            let on = dom::data(&r, "h").as_deref() == Some(h);
-            dom::toggle(&r, "on", on);
-        }
+    for r in dom::qa("#ltable .crow") {
+        let on = dom::data(&r, "h").as_deref() == Some(h);
+        dom::toggle(&r, "on", on);
     }
     render();
     nav::nav(true);

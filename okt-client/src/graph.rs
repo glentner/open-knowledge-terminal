@@ -2076,15 +2076,20 @@ fn set_hover(new: Option<usize>, cx: f64, cy: f64) {
         schedule();
     }
     if !dom::hidden(&tip) {
+        // beside the pointer, on its other side where the pane runs out, and kept inside the pane
         let (left, top, w, h) = g().host_rect;
+        let size = tip.get_bounding_client_rect();
+        let (tw, th) = (size.width(), size.height());
         let mut x = cx - left + 14.0;
         let mut y = cy - top + 14.0;
-        if x + 300.0 > w {
-            x -= 320.0;
+        if x + tw > w {
+            x = cx - left - 14.0 - tw;
         }
-        if y + 70.0 > h {
-            y -= 80.0;
+        if y + th > h {
+            y = cy - top - 14.0 - th;
         }
+        let x = x.min(w - tw - 4.0).max(4.0);
+        let y = y.min(h - th - 4.0).max(4.0);
         dom::set_style(&tip, "left", &format!("{}px", num(x)));
         dom::set_style(&tip, "top", &format!("{}px", num(y)));
     }
@@ -2125,7 +2130,9 @@ pub fn toggle_collapse(id: &str, force: Option<bool>) {
     );
 }
 
-fn resize() {
+/// Fit the canvas to its pane: its size, and its place on the page for hit-testing (a pane can move
+/// without resizing, which the ResizeObserver doesn't see).
+pub fn fit_pane() {
     let host = dom::id("v-graph");
     let r = host.get_bounding_client_rect();
     let mut gs = g();
@@ -2166,13 +2173,13 @@ pub fn wire() {
     }
     // size: follow the pane
     let ro_cb = wasm_bindgen::closure::Closure::<dyn FnMut(js_sys::Array)>::new(
-        move |_entries: js_sys::Array| resize(),
+        move |_entries: js_sys::Array| fit_pane(),
     );
     if let Ok(ro) = web_sys::ResizeObserver::new(ro_cb.as_ref().unchecked_ref()) {
         ro.observe(&dom::id("v-graph"));
     }
     ro_cb.forget();
-    dom::on(dom::win().as_ref(), "scroll", |_: web_sys::Event| resize());
+    dom::on(dom::win().as_ref(), "scroll", |_: web_sys::Event| fit_pane());
     let cvt: &web_sys::EventTarget = cv.as_ref();
     dom::on_active(cvt, "wheel", |e: WheelEvent| {
         e.prevent_default();
@@ -2307,5 +2314,5 @@ pub fn wire() {
             }
         });
     }
-    resize();
+    fit_pane();
 }

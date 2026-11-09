@@ -2,13 +2,14 @@
 //! localStorage), and `S`, the client state. Everything lives on the one UI thread; borrows are
 //! kept short and never held across calls that may re-enter (focus, blur).
 
-use std::cell::{Ref, RefCell, RefMut};
+use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
 
+use crate::arrange::{self, Node, PaneId};
 use crate::dom;
 use crate::model::{FilePayload, Idx, LogData, SearchFile, TableData};
 
@@ -82,6 +83,8 @@ pub struct Settings {
     pub reader: Option<String>,
     pub ticker: bool,
     pub labels: bool,
+    /// the splitter width before arrangements, a percentage: read (it sizes classic on a first
+    /// load) and written back unchanged, so an older okt still finds it; nothing updates it now
     pub insp: f64,
     pub collapsed: IndexMap<String, bool>,
     pub collapse: Option<i64>,
@@ -90,6 +93,11 @@ pub struct Settings {
     pub badge: Option<bool>,
     /// up to nine pinned ids, for the keys 1-9 (m pins and unpins)
     pub pins: Vec<String>,
+    /// the pane arrangement in use
+    pub arr: Node,
+    /// the arrangement was chosen (loaded from the store, or changed by the user), so it is
+    /// written; until then a save of any other setting leaves the default unsaved
+    pub arr_saved: bool,
     extra: Map<String, Value>,
 }
 
@@ -110,7 +118,28 @@ fn storage() -> Option<web_sys::Storage> {
 
 impl Settings {
     fn load() -> Settings {
-        let b = boot();
+        let stored: Option<Map<String, Value>> = storage()
+            .and_then(|st| st.get_item(&skey()).ok().flatten())
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .and_then(|v| {
+                if let Value::Object(m) = v {
+                    Some(m)
+                } else {
+                    None
+                }
+            });
+        let width = dom::win()
+            .inner_width()
+            .ok()
+            .and_then(|w| w.as_f64())
+            .unwrap_or(1600.0);
+        Settings::from_map(boot(), stored, width)
+    }
+
+    /// The settings from the stored blob, with the boot defaults. Pure, so the migration is tested
+    /// natively. `width` is the window's at load: with no arrangement saved it picks the default,
+    /// once per load and never on a window resize.
+    fn from_map(b: &Boot, stored: Option<Map<String, Value>>, width: f64) -> Settings {
         let mut s = Settings {
             theme: if b.theme.is_empty() {
                 "terminal".into()
@@ -132,19 +161,13 @@ impl Settings {
             table_cols: None,
             badge: None,
             pins: Vec::new(),
+            arr: arrange::default_for(width, None),
+            arr_saved: false,
             extra: Map::new(),
         };
-        let stored: Option<Map<String, Value>> = storage()
-            .and_then(|st| st.get_item(&skey()).ok().flatten())
-            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-            .and_then(|v| {
-                if let Value::Object(m) = v {
-                    Some(m)
-                } else {
-                    None
-                }
-            });
         let Some(m) = stored else { return s };
+        let mut arr = None;
+        let mut had_insp = false;
         for (k, v) in m {
             match (k.as_str(), &v) {
                 ("theme", Value::String(x)) => s.theme = x.clone(),
@@ -153,7 +176,13 @@ impl Settings {
                 ("reader", Value::Null) => s.reader = None,
                 ("ticker", Value::Bool(x)) => s.ticker = *x,
                 ("labels", Value::Bool(x)) => s.labels = *x,
-                ("insp", Value::Number(x)) => s.insp = x.as_f64().unwrap_or(46.0),
+                ("insp", Value::Number(x)) => {
+                    s.insp = x.as_f64().unwrap_or(46.0);
+                    had_insp = true;
+                }
+                // read below; one that doesn't parse is dropped, never kept in `extra`, where it
+                // would be written back beside a different tree
+                ("arrangement", _) => arr = Some(v),
                 ("collapsed", Value::Object(o)) => {
                     s.collapsed = o
                         .iter()
@@ -197,6 +226,18 @@ impl Settings {
                 }
             }
         }
+        match arr
+            .as_ref()
+            .and_then(arrange::from_json)
+            .and_then(arrange::sanitise)
+        {
+            Some(n) => {
+                s.arr = n;
+                s.arr_saved = true;
+            }
+            // a splitter width saved before arrangements sizes classic, when classic starts
+            None => s.arr = arrange::default_for(width, had_insp.then_some(s.insp)),
+        }
         s
     }
 
@@ -220,6 +261,9 @@ impl Settings {
         if !self.pins.is_empty() {
             m.insert("pins".into(), json!(self.pins));
         }
+        if self.arr_saved {
+            m.insert("arrangement".into(), arrange::to_json(&self.arr));
+        }
         Value::Object(m)
     }
 
@@ -240,14 +284,29 @@ impl Settings {
 
 static SAVE: dom::Debounce = dom::Debounce::new(200);
 
+thread_local! {
+    static PENDING: Cell<bool> = const { Cell::new(false) };
+}
+
 /// `saveSettings()` (debounced 200 ms).
 pub fn save_settings() {
-    SAVE.call(|| {
-        let text = cfg().to_json().to_string();
-        if let Some(st) = storage() {
-            let _ = st.set_item(&skey(), &text);
-        }
-    });
+    PENDING.set(true);
+    SAVE.call(write_settings);
+}
+
+fn write_settings() {
+    PENDING.set(false);
+    let text = cfg().to_json().to_string();
+    if let Some(st) = storage() {
+        let _ = st.set_item(&skey(), &text);
+    }
+}
+
+/// Write a save still waiting out its debounce, now (on `pagehide`, so a reload keeps it).
+pub fn flush_settings() {
+    if PENDING.get() {
+        write_settings();
+    }
 }
 
 // ---- client state (S) ------------------------------------------------------------------------
@@ -297,7 +356,11 @@ pub enum HistEntry {
 
 pub struct State {
     pub idx: Option<Rc<Idx>>,
+    /// the current one of the five main views: what the focused pane shows, or, while a pane
+    /// showing the Inspector has focus, the last of the five that had it (the hash's `v`)
     pub view: &'static str,
+    /// the focused pane, which the view keys act on
+    pub focus: PaneId,
     pub sel: Option<String>,
     pub tab: String,
     pub commit: Option<String>,
@@ -339,6 +402,7 @@ impl State {
         State {
             idx: None,
             view: "graph",
+            focus: 0,
             sel: None,
             tab: "overview".into(),
             commit: None,
@@ -447,5 +511,47 @@ pub fn current_folder() -> String {
         "dir" => n.id.clone(),
         "file" => n.parent.clone().unwrap_or_else(|| ".".into()),
         _ => ".".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arrangement_is_written_only_once_chosen() {
+        let b = Boot::default();
+        // a first load: the width default, unsaved, and a save of another setting keeps it so
+        let mut s = Settings::from_map(&b, None, 1600.0);
+        assert!(!s.arr_saved);
+        assert_eq!(s.arr, arrange::default_for(1600.0, None));
+        s.labels = true;
+        let j = s.to_json();
+        assert!(j.get("arrangement").is_none());
+        assert_eq!(j["labels"], json!(true));
+        assert_eq!(j["insp"], json!(46.0), "insp is still written");
+        // a pre-arrangement blob: insp sizes classic at the width that starts classic, and stays
+        let old = json!({"theme": "dark", "insp": 30});
+        let s2 = Settings::from_map(&b, old.as_object().cloned(), 1600.0);
+        assert!(!s2.arr_saved);
+        assert_eq!(s2.arr, arrange::default_for(1600.0, Some(30.0)));
+        assert_eq!(s2.to_json()["insp"], json!(30.0));
+        assert!(s2.to_json().get("arrangement").is_none());
+        let narrow = Settings::from_map(&b, old.as_object().cloned(), 899.0);
+        assert_eq!(narrow.arr, arrange::stacked());
+        // chosen: written, and read back as saved at any width
+        s.arr_saved = true;
+        let j = s.to_json();
+        assert!(j.get("arrangement").is_some());
+        let back = Settings::from_map(&b, j.as_object().cloned(), 700.0);
+        assert!(back.arr_saved);
+        assert_eq!(back.arr, s.arr);
+        assert_eq!(back.to_json()["arrangement"], j["arrangement"]);
+        // one that doesn't parse is dropped, not carried in `extra`
+        let bad = json!({"theme": "dark", "arrangement": "classic", "future": 1});
+        let s3 = Settings::from_map(&b, bad.as_object().cloned(), 1600.0);
+        assert!(!s3.arr_saved);
+        assert!(s3.to_json().get("arrangement").is_none());
+        assert_eq!(s3.to_json()["future"], json!(1));
     }
 }

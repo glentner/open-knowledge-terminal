@@ -82,9 +82,9 @@ async fn reload(change: Option<Change>) -> Result<(), String> {
             st.log_data = None;
         }
         views::log::ensure(true).await.map_err(|e| e.message())?;
-        if s().view == "log" {
-            views::log::render();
-        }
+        // the Log's rows are what its keys step through, so they follow the history wherever the
+        // Log is, on screen or not
+        views::log::render();
     }
     if let Some(sel) = state::sel() {
         if !idx.has(&sel) {
@@ -93,14 +93,14 @@ async fn reload(change: Option<Change>) -> Result<(), String> {
         }
     }
     graph::build(&flash);
-    if s().view == "files" {
+    if crate::panes::visible("files") {
         views::tree::render();
     }
-    let (view, folder, rec) = {
+    let (folder, rec) = {
         let st = s();
-        (st.view, st.table_folder.clone(), st.table_recursive)
+        (st.table_folder.clone(), st.table_recursive)
     };
-    if view == "table" {
+    if crate::panes::visible("table") {
         if let Some(f) = folder {
             let url = format!(
                 "/api/table?folder={}&recursive={}",

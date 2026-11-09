@@ -67,6 +67,14 @@ their counts. Size them, and the thresholds derived from them, in `ch`.
 
 **Seed:** [`issues/font-relative-count-cells.md`](issues/font-relative-count-cells.md)
 
+### 4. Literal tokens drawn as source rows
+
+The source-row rule `.src .l` also matches Pygments' literal token class `l`, so with the blame on
+a YAML scalar becomes a row grid with its own gutter, and the Inspector scrolls sideways. Scope the
+rule to the rows.
+
+**Seed:** [`issues/source-row-token-class.md`](issues/source-row-token-class.md)
+
 ---
 
 ## Settled questions

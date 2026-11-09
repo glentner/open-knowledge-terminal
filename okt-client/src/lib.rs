@@ -4,6 +4,7 @@
 
 mod actions;
 mod api;
+mod arrange;
 mod chrome;
 mod dom;
 mod fmt;
@@ -15,6 +16,7 @@ mod keys;
 mod live;
 mod model;
 mod nav;
+mod panes;
 mod state;
 mod theme;
 mod views;
@@ -30,7 +32,7 @@ pub fn start() {
     spawn(boot());
 }
 
-/// Boot: apply the theme, wire the panes and keys, then load the first index.
+/// Boot: apply the theme, wire the views, the arrangement and the keys, then load the first index.
 async fn boot() {
     theme::apply_theme();
     graph::wire();
@@ -40,6 +42,7 @@ async fn boot() {
     views::list::wire();
     go::wire();
     chrome::wire_settings();
+    panes::wire();
     keys::wire();
     chrome::register_sw();
     let text = match api::get_text("/api/index").await {
@@ -80,18 +83,7 @@ async fn boot() {
     spawn(async {
         let _ = views::log::ensure(false).await;
     });
-    if dom::location_hash().len() > 1 {
-        nav::apply_hash().await;
-    } else {
-        nav::set_view("graph", true);
-        nav::render_crumbs();
-        insp::render();
-        let h = nav::state_hash();
-        let _ = dom::win()
-            .history()
-            .unwrap()
-            .replace_state_with_url(&JsValue::NULL, "", Some(&h));
-    }
+    nav::boot_view().await;
     live::connect();
     let _ = s().view;
 }

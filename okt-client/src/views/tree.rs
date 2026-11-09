@@ -263,7 +263,7 @@ pub fn render() {
         None => format!("{} files", fmt_n(idx.files().count() as f64)),
     };
     dom::set_text(&dom::id("fmeta"), &meta);
-    if sel.is_some() && s().view == "files" {
+    if sel.is_some() && crate::panes::visible("files") {
         if let Some(on) = dom::q_in(&tree, ".trow.on") {
             dom::scroll_into_view_nearest(&on);
         }
@@ -341,8 +341,14 @@ pub fn wire() {
     dom::on_id("ffilter", "input", |_: web_sys::Event| FILTER.call(render));
 }
 
-/// `treeKey(e)`: arrows, j/k, Enter in the tree. True when handled.
+/// `treeKey(e)`: arrows, j/k, Enter in the tree. True when handled. The keys step from the marked
+/// row, which a render marks from the selection. Off screen (its pane collapsed, or its slot showing
+/// the Inspector) the tree is not redrawn when the selection moves elsewhere, so it is drawn here
+/// first, and the keys step from the selection as they do on screen.
 pub fn key(e: &KeyboardEvent) -> bool {
+    if !crate::panes::visible("files") {
+        render();
+    }
     let rows = dom::qa("#tree .trow:not(.thead)");
     if rows.is_empty() {
         return false;

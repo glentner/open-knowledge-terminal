@@ -1,18 +1,53 @@
-//! Global events (`wireGlobal()`): click delegation, the keyboard, the splitter, timers.
+//! Global events (`wireGlobal()`): click delegation, the keyboard, timers.
+
+use std::cell::Cell;
 
 use wasm_bindgen::JsCast;
-use web_sys::{Event, KeyboardEvent, MouseEvent, PointerEvent};
+use web_sys::{Event, KeyboardEvent, MouseEvent};
 
 use crate::actions;
 use crate::api::spawn;
+use crate::arrange::{self, Preset};
 use crate::chrome::{self, toast};
 use crate::dom;
 use crate::graph;
 use crate::insp;
 use crate::js::{self, num};
 use crate::nav::{self, SelOpts};
-use crate::state::{self, ListData, ListItem, Live, boot, cfg, cfg_mut, s, s_mut, save_settings};
+use crate::panes;
+use crate::state::{self, ListData, ListItem, Live, boot, s, s_mut};
 use crate::views;
+
+thread_local! {
+    /// when the pane leader `w` was pressed (`dom::perf_now`), or below zero when none is pending
+    static LEADER: Cell<f64> = const { Cell::new(-1.0) };
+}
+
+/// How long the leader waits for its second key, in ms.
+const LEADER_MS: f64 = 2000.0;
+
+fn leader_pending() -> bool {
+    let t = LEADER.get();
+    t >= 0.0 && dom::perf_now() - t <= LEADER_MS
+}
+
+/// The second key of the pane leader `w`, acting on the focused pane. False for a key that is
+/// not one, which is then handled as usual.
+fn pane_key(k: &str) -> bool {
+    use arrange::Dir::{Next, Prev};
+    match k {
+        "w" => nav::operate(|n, id| arrange::focus_step(n, id, 1)),
+        "W" => nav::operate(|n, id| arrange::focus_step(n, id, -1)),
+        "d" => nav::operate(arrange::collapse_toggle),
+        "x" => nav::operate(|n, id| arrange::swap(n, id, Next)),
+        "r" => nav::operate(arrange::flip),
+        "q" => nav::operate(|n, id| arrange::close(n, id, Next)),
+        "v" => nav::operate(|n, id| arrange::move_view(n, id, Next)),
+        "V" => nav::operate(|n, id| arrange::move_view(n, id, Prev)),
+        _ => return false,
+    }
+    true
+}
 
 fn parse_ln(v: Option<String>) -> Option<i64> {
     let v = v?;
@@ -90,11 +125,21 @@ fn on_click(e: MouseEvent) {
         e.prevent_default();
         return;
     }
-    if let Some(vw) = dom::closest(&t, "[data-view]") {
-        if !dom::has_class(&vw, "fk") {
-            nav::set_view(&dom::data(&vw, "view").unwrap_or_default(), false);
-            return;
+    if let Some(b) = dom::closest(&t, "[data-preset]") {
+        // the button gives up focus, so a later space or Enter isn't a second click
+        dom::blur(&b);
+        if let Some(p) = dom::data(&b, "preset").and_then(|x| Preset::parse(&x)) {
+            nav::preset(p);
         }
+        return;
+    }
+    // a pane's tab, or a link to a view: the Inspector goes to its own placement
+    if let Some(vw) = dom::closest(&t, "[data-view]") {
+        match dom::data(&vw, "view").unwrap_or_default().as_str() {
+            "insp" => nav::show_insp(),
+            v => nav::set_view(v, false),
+        }
+        return;
     }
     if let Some(at) = dom::closest(&t, "[data-at]") {
         e.stop_propagation();
@@ -312,12 +357,25 @@ fn on_key(e: KeyboardEvent) {
         return;
     }
     let k = e.key();
+    // the pane leader: a modifier alone leaves it waiting (so w W and w V reach it), Escape
+    // cancels it, and any other key cancels it and is then handled as usual
+    if leader_pending() {
+        if matches!(k.as_str(), "Shift" | "Control" | "Alt" | "Meta" | "CapsLock") {
+            return;
+        }
+        LEADER.set(-1.0);
+        if k == "Escape" || pane_key(&k) {
+            e.prevent_default();
+            return;
+        }
+    }
     if k == "/" || k == ":" {
         e.prevent_default();
         dom::focus(&dom::id("go"));
         return;
     }
-    let view = s().view;
+    // the view keys act on the focused pane's view, or through the Inspector's to the view before
+    let view = panes::key_view();
     if view == "files" && views::tree::key(&e) {
         e.prevent_default();
         return;
@@ -488,6 +546,21 @@ fn on_key(e: KeyboardEvent) {
             chrome::show_help();
             true
         }
+        // the arrangement: a preset each, the cycle, and the pane leader
+        ";" | "'" | "\\" | "`" => {
+            if let Some(p) = Preset::from_key(&k) {
+                nav::preset(p);
+            }
+            true
+        }
+        "p" => {
+            nav::cycle_preset();
+            true
+        }
+        "w" => {
+            LEADER.set(dom::perf_now());
+            true
+        }
         "R" => {
             actions::rebuild();
             true
@@ -598,12 +671,6 @@ fn press(sel: &str, what: &str) {
 /// `wireGlobal()`
 pub fn wire() {
     dom::on(dom::doc().as_ref(), "click", on_click);
-    for b in dom::qa(".fk") {
-        let v = dom::data(&b, "view").unwrap_or_default();
-        dom::on(b.as_ref(), "click", move |_: MouseEvent| {
-            nav::set_view(&v, false)
-        });
-    }
     for b in dom::qa("#itabs button") {
         let t = dom::data(&b, "tab").unwrap_or_default();
         dom::on(b.as_ref(), "click", move |_: MouseEvent| nav::set_tab(&t));
@@ -640,65 +707,22 @@ pub fn wire() {
         }
     });
     dom::on(dom::win().as_ref(), "popstate", |_: Event| {
-        spawn(async { nav::apply_hash().await })
+        spawn(async {
+            nav::apply_hash().await;
+        })
     });
     dom::on(dom::doc().as_ref(), "keydown", on_key);
-    // resizable inspector
-    let panes = dom::id("panes");
-    dom::set_style(&panes, "--insp-w", &format!("{}%", num(cfg().insp)));
-    dom::on_id("split", "pointerdown", |e: PointerEvent| {
-        e.prevent_default();
-        let split = dom::id("split");
-        dom::add_class(&split, "drag");
-        let mv =
-            wasm_bindgen::closure::Closure::<dyn FnMut(PointerEvent)>::new(|ev: PointerEvent| {
-                let panes = dom::id("panes");
-                let r = panes.get_bounding_client_rect();
-                let pct =
-                    (100.0 * (r.right() - ev.client_x() as f64) / r.width()).clamp(22.0, 75.0);
-                let v = (pct * 10.0 + 0.5).floor() / 10.0;
-                cfg_mut().insp = v;
-                dom::set_style(&panes, "--insp-w", &format!("{}%", num(v)));
-            });
-        let w = dom::win();
-        let _ = w.add_event_listener_with_callback("pointermove", mv.as_ref().unchecked_ref());
-        let mv_fn: js_sys::Function = mv.as_ref().unchecked_ref::<js_sys::Function>().clone();
-        mv.forget();
-        let up_slot: std::rc::Rc<std::cell::RefCell<Option<js_sys::Function>>> = Default::default();
-        let up_slot2 = up_slot.clone();
-        let up = wasm_bindgen::closure::Closure::<dyn FnMut(PointerEvent)>::new(
-            move |_: PointerEvent| {
-                dom::remove_class(&dom::id("split"), "drag");
-                let w = dom::win();
-                let _ = w.remove_event_listener_with_callback("pointermove", &mv_fn);
-                // taking the handle out breaks the cycle (this closure -> slot -> its own
-                // function), so both closures are freed once the drag ends
-                if let Some(f) = up_slot2.borrow_mut().take() {
-                    let _ = w.remove_event_listener_with_callback("pointerup", &f);
-                }
-                save_settings();
-                if s().view == "log" {
-                    views::log::render();
-                }
-            },
-        );
-        let up_fn: js_sys::Function = up.as_ref().unchecked_ref::<js_sys::Function>().clone();
-        *up_slot.borrow_mut() = Some(up_fn.clone());
-        let _ = w.add_event_listener_with_callback("pointerup", &up_fn);
-        up.forget();
-    });
+    dom::on(dom::win().as_ref(), "blur", |_: Event| LEADER.set(-1.0));
+    // a reload inside the settings' save debounce keeps the change
+    dom::on(dom::win().as_ref(), "pagehide", |_: Event| state::flush_settings());
     static RESIZE: dom::Debounce = dom::Debounce::new(150);
+    // the views follow their panes (their own observers); the window resize keeps the ticker
     dom::on(dom::win().as_ref(), "resize", |_: Event| {
-        RESIZE.call(|| {
-            if s().view == "log" {
-                views::log::render();
-            }
-            chrome::render_ticker();
-        })
+        RESIZE.call(chrome::render_ticker)
     });
     dom::interval(1000, chrome::tick_clock);
     dom::interval(60000, || {
-        if s().view == "files" {
+        if panes::visible("files") {
             views::tree::render();
         }
         chrome::render_ticker();

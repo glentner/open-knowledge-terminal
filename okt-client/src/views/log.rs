@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use indexmap::IndexMap;
-use wasm_bindgen::JsValue;
+use wasm_bindgen::JsCast;
 use web_sys::{KeyboardEvent, MouseEvent};
 
 use crate::api::{self, ApiError};
@@ -13,6 +13,7 @@ use crate::fmt::{self, MON, day_key, short};
 use crate::insp;
 use crate::js::{self, esc, fmt_n, num, pad2, to_fixed};
 use crate::model::{Commit, LogData};
+use crate::panes;
 use crate::state::{s, s_mut};
 
 /// `ensureLog(force)`
@@ -72,18 +73,23 @@ fn matches(c: &Commit) -> bool {
     })
 }
 
-/// `renderLog()`
-pub fn render() {
-    let Some(data) = s().log_data.clone() else {
-        return;
-    };
-    let all = &data.commits;
-    let list: Vec<&Commit> = all.iter().filter(|c| matches(c)).collect();
-    // chart: commits per day
+/// Commits per day, in the order the days are first met.
+fn per_day(all: &[Commit]) -> IndexMap<String, f64> {
     let mut days: IndexMap<String, f64> = IndexMap::new();
     for c in all {
         *days.entry(day_key(c.t)).or_insert(0.0) += 1.0;
     }
+    days
+}
+
+/// The commits-per-day chart alone, drawn for the chart's own width: the rows fit by CSS, so a
+/// change of the pane's width redraws only this.
+pub fn render_chart() {
+    let Some(data) = s().log_data.clone() else {
+        return;
+    };
+    let all = &data.commits;
+    let days = per_day(all);
     let chart = dom::id("lchart");
     let log_day = s().log_day.clone();
     if !all.is_empty() {
@@ -158,6 +164,18 @@ pub fn render() {
     } else {
         dom::set_html(&chart, "<div class=\"empty\">No commits yet.</div>");
     }
+}
+
+/// `renderLog()`
+pub fn render() {
+    let Some(data) = s().log_data.clone() else {
+        return;
+    };
+    let all = &data.commits;
+    let list: Vec<&Commit> = all.iter().filter(|c| matches(c)).collect();
+    let days = per_day(all);
+    let log_day = s().log_day.clone();
+    render_chart();
     // prefix chips
     let mut px: IndexMap<String, f64> = IndexMap::new();
     for c in all {
@@ -252,6 +270,7 @@ pub fn render() {
 }
 
 static FILTER: dom::Debounce = dom::Debounce::new(100);
+static FIT: dom::Debounce = dom::Debounce::new(100);
 
 /// `wireLog()`
 pub fn wire() {
@@ -290,7 +309,21 @@ pub fn wire() {
             insp::open_commit(&dom::data(&row, "h").unwrap_or_default());
         }
     });
-    let _ = JsValue::NULL;
+    // the chart follows its pane's width, whatever changed it (a drag, a preset, a neighbour
+    // collapsing, the window)
+    let fit = wasm_bindgen::closure::Closure::<dyn FnMut(js_sys::Array)>::new(
+        move |_entries: js_sys::Array| {
+            FIT.call(|| {
+                if panes::visible("log") {
+                    render_chart();
+                }
+            })
+        },
+    );
+    if let Ok(ro) = web_sys::ResizeObserver::new(fit.as_ref().unchecked_ref()) {
+        ro.observe(&dom::id("lchart"));
+    }
+    fit.forget();
 }
 
 /// `logKey(e)`

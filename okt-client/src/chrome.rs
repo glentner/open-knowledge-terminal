@@ -486,13 +486,33 @@ pub fn show_help() {
         ("m 1–9", "pin the selection; go to a pin"),
         ("E O F", "edit, open, reveal"),
         ("[ ]", "back, forward"),
-        ("↑ ↓ ⏎", "move and open in lists (j k move too)"),
+        ("↑ ↓ ⏎", "move and open in files and the log (j k move too)"),
         ("space", "files: open or close a folder, or show a file in the graph"),
         ("+ − 0", "zoom in, out, fit"),
         ("R", "rebuild the index"),
         ("esc", "close, then clear the selection"),
         ("?", "this help"),
     ];
+    // the arrangement: a row per preset key, the cycle, and the pane leader's keys
+    #[rustfmt::skip]
+    let pane_keys: &[(&str, &str)] = &[
+        (";", "classic: views left, Inspector right"),
+        ("'", "swapped: Inspector left, views right"),
+        ("\\", "stacked: views on top, Inspector below"),
+        ("`", "three: the Graph's bar on top, Inspector left, Files right"),
+        ("p", "cycle the presets"),
+        ("w", "then a pane key, acting on the focused pane (a click in a pane focuses it)"),
+        ("w w  w W", "focus the next, previous pane"),
+        ("w d", "collapse the focused pane to its title bar, or expand it"),
+        ("w x", "swap it with its neighbour, each keeping its views"),
+        ("w r", "turn its split between side by side and stacked"),
+        ("w q", "close it; its views go to its neighbour, which takes the space"),
+        ("w v  w V", "move its view to its neighbour; moving the last closes it"),
+    ];
+    let pd: String = pane_keys
+        .iter()
+        .map(|(k, d)| format!("<dt><kbd>{}</kbd></dt><dd>{}</dd>", esc(k), esc(d)))
+        .collect();
     let pins: String = {
         let p = cfg().pins.clone();
         if p.is_empty() {
@@ -525,7 +545,7 @@ pub fn show_help() {
     dom::set_html(
         &el,
         &format!(
-            "<div class=\"helpbox\"><h3>OK TERMINAL · HELP</h3>\n    <div><h4>KEYS</h4><dl>{kd}</dl>\n    <h4>GRAPH</h4><dl><dt>click</dt><dd>shine a light on a node and everything it touches</dd><dt>double-click</dt><dd>expand or collapse a folder; empty space fits</dd><dt>drag, wheel</dt><dd>pan, zoom</dd><dt>accent arrows</dt><dd>links out; pale lines are links in</dd><dt>dashed</dt><dd>connections to external systems</dd></dl>\n    <h4>PINS</h4><dl>{pins}</dl></div>\n    <div><h4>COMMANDS</h4><dl>{cd}</dl></div>\n    <div class=\"full\">Anything else you type opens the best-matching file or folder; a commit hash opens that commit; if nothing matches it runs FIND. The terminal is read-only; EDIT, OPEN and REVEAL hand the file to your apps.</div></div>"
+            "<div class=\"helpbox\"><h3>OK TERMINAL · HELP</h3>\n    <div><h4>KEYS</h4><dl>{kd}</dl>\n    <h4>PANES</h4><dl>{pd}</dl>\n    <h4>GRAPH</h4><dl><dt>click</dt><dd>shine a light on a node and everything it touches</dd><dt>double-click</dt><dd>expand or collapse a folder; empty space fits</dd><dt>drag, wheel</dt><dd>pan, zoom</dd><dt>accent arrows</dt><dd>links out; pale lines are links in</dd><dt>dashed</dt><dd>connections to external systems</dd></dl>\n    <h4>PINS</h4><dl>{pins}</dl></div>\n    <div><h4>COMMANDS</h4><dl>{cd}</dl></div>\n    <div class=\"full\">Anything else you type opens the best-matching file or folder; a commit hash opens that commit; if nothing matches it runs FIND. The terminal is read-only; EDIT, OPEN and REVEAL hand the file to your apps.</div></div>"
         ),
     );
     dom::set_hidden(&el, false);

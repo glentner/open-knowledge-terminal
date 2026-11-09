@@ -34,18 +34,19 @@
     </div>
   </header>
 
-  <nav class="fkeys" aria-label="Views">
-    <button class="fk" data-view="graph"><kbd>G</kbd>GRAPH</button>
-    <button class="fk" data-view="files"><kbd>F</kbd>FILES</button>
-    <button class="fk" data-view="log"><kbd>L</kbd>LOG</button>
-    <button class="fk" data-view="table"><kbd>T</kbd>TABLE</button>
-    <button class="fk" data-view="list"><kbd>/</kbd>RESULTS</button>
+  <nav class="fkeys" aria-label="Window">
+    <div class="presets" id="presets" aria-label="Arrangements">
+      <button class="pre" data-preset="classic" title="Views left, Inspector right (;)">CLASSIC<kbd>;</kbd></button>
+      <button class="pre" data-preset="swapped" title="Inspector left, views right (')">SWAPPED<kbd>'</kbd></button>
+      <button class="pre" data-preset="stacked" title="Views on top, Inspector below (\)">STACKED<kbd>\</kbd></button>
+      <button class="pre" data-preset="three" title="Graph bar on top, Inspector left, Files right (`)">THREE<kbd>`</kbd></button>
+    </div>
     <div class="crumbs" id="crumbs"></div>
   </nav>
 
   <main class="panes" id="panes">
-    <section class="view" id="view">
-      <div class="vpane" id="v-graph">
+    <div id="parking" hidden>
+      <div class="vpane" id="v-graph" hidden>
         <canvas id="graph" aria-label="Knowledge graph"></canvas>
         <div class="gtools">
           <button data-z="in" title="Zoom in (+)">+</button>
@@ -75,17 +76,16 @@
         <div class="vhead"><span class="vt" id="listtitle">RESULTS</span><span class="vmeta" id="listmeta"></span></div>
         <div class="list" id="list" tabindex="0"></div>
       </div>
-    </section>
-    <div class="split" id="split" title="Drag to resize"></div>
-    <aside class="insp" id="insp">
-      <div class="ihead" id="ihead"></div>
-      <div class="itabs" id="itabs">
-        <button data-tab="overview"><kbd>O</kbd>OVERVIEW</button>
-        <button data-tab="content"><kbd>C</kbd>CONTENT</button>
-        <button data-tab="history"><kbd>H</kbd>HISTORY</button>
-      </div>
-      <div class="ibody" id="ibody"></div>
-    </aside>
+      <aside class="insp" id="insp" hidden>
+        <div class="ihead" id="ihead"></div>
+        <div class="itabs" id="itabs">
+          <button data-tab="overview"><kbd>O</kbd><span>OVERVIEW</span></button>
+          <button data-tab="content"><kbd>C</kbd><span>CONTENT</span></button>
+          <button data-tab="history"><kbd>H</kbd><span>HISTORY</span></button>
+        </div>
+        <div class="ibody" id="ibody"></div>
+      </aside>
+    </div>
   </main>
 
   <div class="ticker" id="ticker"><span class="tlabel">COMMITS</span><div class="tview"><div class="ttrack" id="ttrack"></div></div></div>

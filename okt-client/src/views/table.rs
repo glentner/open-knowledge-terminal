@@ -34,9 +34,21 @@ const PRIORITY_COLS: &[&str] = &[
     "updated",
 ];
 
-/// `openTable(folder, recursive)`
+/// `openTable(folder, recursive)`: the user's open. The folder's table is loaded, then shown where
+/// it is held (or in the focused pane), focused, rendered and put in the history.
 pub async fn open(folder: &str, recursive: Option<bool>) {
-    let Some(idx) = state::idx() else { return };
+    if load(folder, recursive).await {
+        nav::set_view("table", false);
+    }
+}
+
+/// Load a folder's table into the state and show nothing; false when it didn't load. A Table that
+/// comes on screen by itself (on boot, a pane grown back, an operation) loads with this and only
+/// renders: focus, the hash and the history move only by the user's action.
+pub async fn load(folder: &str, recursive: Option<bool>) -> bool {
+    let Some(idx) = state::idx() else {
+        return false;
+    };
     let mut folder = if folder.is_empty() {
         ".".to_string()
     } else {
@@ -58,7 +70,7 @@ pub async fn open(folder: &str, recursive: Option<bool>) {
             Some(m) => folder = m.id.clone(),
             None => {
                 toast("TABLE", &format!("No folder {folder}"), true);
-                return;
+                return false;
             }
         }
     }
@@ -81,13 +93,19 @@ pub async fn open(folder: &str, recursive: Option<bool>) {
     };
     let mut t: TableData = match api::get(&q(rec)).await {
         Ok(t) => t,
-        Err(e) => return dom::log_err("table", &e.message()),
+        Err(e) => {
+            dom::log_err("table", &e.message());
+            return false;
+        }
     };
     if t.rows.is_empty() && !rec && idx.dinfo(&folder).map(|d| d.files).unwrap_or(0.0) > 0.0 {
         s_mut().table_recursive = true;
         t = match api::get(&q(true)).await {
             Ok(t) => t,
-            Err(e) => return dom::log_err("table", &e.message()),
+            Err(e) => {
+                dom::log_err("table", &e.message());
+                return false;
+            }
         };
     }
     let saved = cfg()
@@ -100,12 +118,7 @@ pub async fn open(folder: &str, recursive: Option<bool>) {
         st.table = Some(Rc::new(t));
         st.table_cols = Some(cols);
     }
-    if s().view != "table" {
-        nav::set_view("table", false);
-    } else {
-        render();
-        nav::nav(true);
-    }
+    true
 }
 
 fn default_cols(t: &TableData) -> Vec<String> {
