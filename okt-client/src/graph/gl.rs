@@ -265,17 +265,17 @@ flat out vec4 v_seg;
 flat out vec2 v_rs;
 flat out vec4 v_col;
 void main() {
-  vec2 p0 = a_seg.xy * u_dpr;
-  vec2 p1 = a_seg.zw * u_dpr;
+  vec2 pa = a_seg.xy * u_dpr;
+  vec2 pb = a_seg.zw * u_dpr;
   float r = a_rs.x * u_dpr;
   float ext = r + 1.5;
-  vec2 d = p1 - p0;
+  vec2 d = pb - pa;
   float len = length(d);
   vec2 t = len > 1e-3 ? d / len : vec2(1.0, 0.0);
   vec2 n = vec2(-t.y, t.x);
-  vec2 p = (p0 + p1) * 0.5 + t * a_corner.x * (len * 0.5 + ext) + n * a_corner.y * ext;
+  vec2 p = (pa + pb) * 0.5 + t * a_corner.x * (len * 0.5 + ext) + n * a_corner.y * ext;
   v_p = p;
-  v_seg = vec4(p0, p1);
+  v_seg = vec4(pa, pb);
   v_rs = vec2(r, a_rs.y);
   v_col = a_col;
   gl_Position = vec4(p.x / u_px.x * 2.0 - 1.0, 1.0 - p.y / u_px.y * 2.0, 0.0, 1.0);
@@ -723,6 +723,10 @@ pub struct Drawn {
     pub walk_angle: Option<f64>,
     /// the highest camera distance a frame of the last flight drew
     pub peak: f64,
+    /// JSON: the cards drawn with an uncommitted-changes dot, and the collapsed folders drawn
+    /// with their file count (`[id, count]`)
+    pub dirty: String,
+    pub counts: String,
 }
 
 thread_local! {
@@ -762,7 +766,7 @@ pub fn publish(cv: &Element, d: &Drawn) {
             .collect::<Vec<_>>()
             .join(",")
     );
-    let vals: [(&'static str, String); 25] = [
+    let vals: [(&'static str, String); 27] = [
         ("data-scale", d.scale.to_string()),
         ("data-region", d.region.clone()),
         (
@@ -793,6 +797,8 @@ pub fn publish(cv: &Element, d: &Drawn) {
             d.walk_angle.map(deg1).unwrap_or_default(),
         ),
         ("data-peak", sig3(d.peak)),
+        ("data-dirty", d.dirty.clone()),
+        ("data-counts", d.counts.clone()),
         ("data-anim", if d.anim { "1" } else { "0" }.to_string()),
     ];
     HOOKS.with(|h| {

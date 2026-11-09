@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feat/graph-galaxy
 base: main
-current_phase: P4
+current_phase: P6
 last_updated: '2026-11-08'
 phases:
 - id: P1
@@ -46,7 +46,7 @@ phases:
   verify: sh spec/graph-galaxy/verify/gate.sh P7
 - id: P4
   name: Focus scale and visibility tiers
-  status: in_progress
+  status: done
   satisfies:
   - R3
   - R8
@@ -542,6 +542,15 @@ depth cues, under a spherical camera.
   - `keys.mjs`: `KEYS_VERBOSE=1` prints passing checks' detail. The env.sh KB's hub has no
     well-defined axis (λ₁/λ₀ = 1.095), so the axis check also solves for the most connected card
     whose set has λ₁/λ₀ ≥ 1.25, and the axis itself is always graded.
+- *Amended in review-cycle-1 remediation (2026-11-08), L2:* the two cues the 2D graph drew come
+  back. A card with uncommitted changes gets a dot at its point's upper right (a GL mark in
+  `--graph-dirty`, `var(--warn)`); a collapsed folder drawn with show all off gets a ring in its
+  family colour and its file count beside it on the overlay (`--glab-count-font`,
+  `--glab-count-ink`), the count's rect an obstacle the labels keep clear of. `NodeVis` carries
+  `dirty` and `collapsed`. Hooks `data-dirty` (the cards drawn with a dot) and `data-counts`
+  (`[id, count]` per folder drawn with its count), written by `gl::publish` from the frame. Rows
+  "an uncommitted card shows its dot" and "a collapsed folder shows its file count". This commit
+  also carries H1's rename of the mark shader's segment ends in `gl.rs`.
 - **Verify:** `sh spec/graph-galaxy/verify/gate.sh P4`.
 - **Touches:** `okt-client/src/graph.rs`, `okt-client/src/graph/{vis,gl,overlay,cam}.rs`,
   `okt-client/src/nav.rs`, `okt-client/static/app.css`, `tests/ui/keys.mjs`.

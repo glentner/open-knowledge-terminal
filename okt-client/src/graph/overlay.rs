@@ -31,12 +31,14 @@ struct Face {
 /// The overlay's text styles, read from the `#goverlay` rule: region names (the rule's own font
 /// and colour), card labels (`--glab-font`, `--glab-ink`), the focus's label (`--glab-focus-font`
 /// in `--glab-accent`) and portal labels (the card font in `--glab-accent`); and the leader line
-/// from a rim glyph to a name placed away from it (`--glab-leader`).
+/// from a rim glyph to a name placed away from it (`--glab-leader`); and a collapsed folder's
+/// file count (`--glab-count-font` in `--glab-count-ink`).
 struct Style {
     region: Face,
     card: Face,
     focus: Face,
     portal: Face,
+    count: Face,
     knockout: String,
     leader: String,
 }
@@ -87,6 +89,16 @@ pub struct Compass {
     pub accent: String,
 }
 
+/// A collapsed folder's file count, its text's bottom-left corner at (`x`, `y`) pane CSS px,
+/// beside the folder's ring.
+pub struct Badge {
+    pub x: f64,
+    pub y: f64,
+    pub text: String,
+    /// the folder, for the `data-counts` hook
+    pub id: String,
+}
+
 /// One ring, at pane CSS px.
 pub struct Ring {
     pub x: f64,
@@ -111,8 +123,9 @@ pub struct Overlay {
     cv: HtmlCanvasElement,
     ctx: CanvasRenderingContext2d,
     style: RefCell<Style>,
-    /// text widths per font (see `class`), keyed by text, cleared when the style is read again
-    widths: RefCell<[HashMap<String, f64>; 3]>,
+    /// text widths per font (see `class`, then the count's), keyed by text, cleared when the
+    /// style is read again
+    widths: RefCell<[HashMap<String, f64>; 4]>,
 }
 
 impl Overlay {
@@ -133,6 +146,7 @@ impl Overlay {
                 card: face("400 10px monospace", "#999"),
                 focus: face("700 10.5px monospace", "#fa0"),
                 portal: face("400 10px monospace", "#fa0"),
+                count: face("700 8.5px monospace", "#999"),
                 knockout: "#000".into(),
                 leader: "#666".into(),
             }),
@@ -162,6 +176,10 @@ impl Overlay {
         set_font(&mut st.region, get("font"));
         set_font(&mut st.card, get("--glab-font"));
         set_font(&mut st.focus, get("--glab-focus-font"));
+        set_font(&mut st.count, get("--glab-count-font"));
+        if let Some(c) = get("--glab-count-ink") {
+            st.count.ink = c;
+        }
         let card_font = (st.card.font.clone(), st.card.size);
         (st.portal.font, st.portal.size) = card_font;
         if let Some(c) = get("color") {
@@ -206,6 +224,31 @@ impl Overlay {
         (w, h)
     }
 
+    /// The rect a badge's text takes, in CSS px (an obstacle for the labels).
+    pub fn badge_rect(&self, b: &Badge) -> Rect {
+        let st = self.style.borrow();
+        let h = (st.count.size * 1.25).ceil();
+        let cached = self.widths.borrow()[3].get(&b.text).copied();
+        let w = cached.unwrap_or_else(|| {
+            self.ctx.set_font(&st.count.font);
+            let w = self
+                .ctx
+                .measure_text(&b.text)
+                .map(|m| m.width())
+                .unwrap_or(b.text.chars().count() as f64 * 5.5)
+                .ceil()
+                + 2.0;
+            self.widths.borrow_mut()[3].insert(b.text.clone(), w);
+            w
+        });
+        Rect {
+            x: b.x,
+            y: b.y - h,
+            w,
+            h,
+        }
+    }
+
     /// A CSS colour as straight RGBA in 0–1: the browser canonicalises it through `fillStyle`
     /// (to `#rrggbb` or `rgba(r, g, b, a)`), and that is parsed. Unparseable gives mid grey.
     pub fn canon(&self, css: &str) -> [f32; 4] {
@@ -226,6 +269,7 @@ impl Overlay {
         color: &str,
         rings: &[Ring],
         labels: &[Placed],
+        badges: &[Badge],
         compass: Option<&Compass>,
     ) {
         let (bw, bh) = ((w * dpr).round() as u32, (h * dpr).round() as u32);
@@ -236,13 +280,14 @@ impl Overlay {
         let ctx = &self.ctx;
         ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
         ctx.clear_rect(0.0, 0.0, bw as f64, bh as f64);
-        if rings.is_empty() && labels.is_empty() && compass.is_none() {
+        if rings.is_empty() && labels.is_empty() && badges.is_empty() && compass.is_none() {
             return;
         }
         ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0).ok();
         if let Some(c) = compass {
             self.compass(w, h, c);
         }
+        self.badges(badges);
         self.labels(labels);
         if rings.is_empty() {
             return;
@@ -334,6 +379,26 @@ impl Overlay {
         ctx.fill_text(c.scale, cx, y0 + COMPASS_PX - face.size * 0.6)
             .ok();
         ctx.set_text_align("start");
+    }
+
+    /// Draw each collapsed folder's count beside its ring, knocked out of the background.
+    fn badges(&self, badges: &[Badge]) {
+        if badges.is_empty() {
+            return;
+        }
+        let st = self.style.borrow();
+        let ctx = &self.ctx;
+        ctx.set_font(&st.count.font);
+        ctx.set_text_align("start");
+        ctx.set_text_baseline("bottom");
+        ctx.set_line_join("round");
+        ctx.set_line_width(3.0);
+        ctx.set_stroke_style_str(&st.knockout);
+        ctx.set_fill_style_str(&st.count.ink);
+        for b in badges {
+            ctx.stroke_text(&b.text, b.x + 1.0, b.y).ok();
+            ctx.fill_text(&b.text, b.x + 1.0, b.y).ok();
+        }
     }
 
     /// Draw each label in its rect, in its kind's font and ink, knocked out of the background

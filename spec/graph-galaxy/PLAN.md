@@ -186,6 +186,10 @@ From [04](research/04-camera.md), with one correction (digest § 3):
   overrides collapse** (R8: every card). The collapse settings keep today's semantics, auto-collapse
   threshold included. Space, Enter, `E`, EXPAND/COLLAPSE ALL and the toast keep today's meaning
   (R6: "with no walk, space and Enter keep today's meaning").
+  - *2026-11-08, review cycle 1 (L2):* the count is drawn as the 2D graph drew it, with show all
+    off: a ring round the folder's point in its family colour and the file count beside it, on
+    the overlay (`--glab-count-*`). A card with uncommitted changes gets its dot back, at its
+    point's upper right (`--graph-dirty`).
 - **Depth cues:**
   - perspective size;
   - saturation and alpha falling over the drawn set's depth range;

@@ -843,6 +843,63 @@ const showAll = async on => {
     seen);
 }
 {
+  // cues on a point: a card with uncommitted changes gets its dot (data-dirty lists the cards drawn
+  // with one), written into the env.sh clone and put back
+  const kbDir = process.env.OKT_KB || '';
+  const hookDirty = async () => JSON.parse((await gattr('data-dirty')) || '[]');
+  const idxDirty = async () => { const i = await (await fetch(OKT + 'api/index')).json(); return Object.keys((i.kb && i.kb.dirty) || {}); };
+  const untilDirty = async (id, want) => {
+    await page.waitForFunction(([id, want]) => JSON.parse(document.getElementById('graph').getAttribute('data-dirty') || '[]').includes(id) === want, [id, want], { timeout: 30000 }).catch(() => {});
+    await twoFrames(page);
+    return { hook: await hookDirty(), idx: await idxDirty() };
+  };
+  const x = walker;
+  let d0 = null, d1 = null, d2 = null;
+  if (/\/okt-env\.[^/]+\/kb$/.test(kbDir)) {
+    const { readFileSync, writeFileSync } = await import('node:fs');
+    await waits(() => go('#v=graph&s=' + encodeURIComponent(x)));
+    d0 = { hook: await hookDirty(), idx: await idxDirty() };
+    const file = `${kbDir}/${x}`;
+    const orig = readFileSync(file, 'utf8');
+    writeFileSync(file, orig + '\nA line the test adds and takes away again.\n');
+    d1 = await untilDirty(x, true);
+    writeFileSync(file, orig);
+    d2 = await untilDirty(x, false);
+  }
+  check('an uncommitted card shows its dot',
+    !!d0 && !d0.hook.includes(x) && d1.hook.includes(x) && d1.idx.includes(x) && d1.hook.every(id => d1.idx.includes(id)) && !d2.hook.includes(x) && !d2.idx.includes(x),
+    { card: x, kb: kbDir, before: d0, dirty: d1, after: d2 });
+}
+{
+  // a collapsed folder drawn while show all is off gets a ring and its file count (data-counts,
+  // [id, count]); show all draws every card, so no folder stands for its files
+  const countsOf = async () => { await page.waitForTimeout(250); await twoFrames(page); return JSON.parse((await gattr('data-counts')) || '[]'); };
+  const under = d => files.filter(f => f.id.startsWith(d)).length;
+  await showAll(false);
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(outer)));
+  let c0 = await countsOf();
+  let toggled = false;
+  if (!c0.some(([id]) => id === inner)) {
+    // space on a selected folder (no walk) collapses it
+    await waits(() => go('#v=graph&s=' + encodeURIComponent(inner)));
+    await key(' ', 600);
+    toggled = true;
+    await waits(() => go('#v=graph&s=' + encodeURIComponent(outer)));
+    c0 = await countsOf();
+  }
+  await showAll(true);
+  const c1 = await countsOf();
+  await showAll(false);
+  const c2 = await countsOf();
+  if (toggled) {
+    await waits(() => go('#v=graph&s=' + encodeURIComponent(inner)));
+    await key(' ', 600);
+  }
+  check('a collapsed folder shows its file count',
+    c0.some(([id, n]) => id === inner && +n === under(inner)) && c0.every(([id, n]) => dirs.has(id) && +n === under(id)) && c1.length === 0 && c2.some(([id]) => id === inner),
+    { outer, inner, files: under(inner), shown: c0.slice(0, 6), showAll: c1.length, back: c2.length });
+}
+{
   await waits(() => go('#v=graph&s=' + encodeURIComponent(hub)));
   await page.evaluate(() => document.activeElement?.blur());
   await showAll(false);

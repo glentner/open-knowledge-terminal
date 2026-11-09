@@ -66,6 +66,8 @@ const CARD_R: f64 = 2.2;
 /// However close the camera comes, a point is drawn no larger than this, in CSS px: a tight
 /// focus set fitted to the pane shows its arrangement, not a few giant discs.
 const POINT_MAX_PX: f64 = 22.0;
+/// The radius of an uncommitted card's dot, CSS px.
+const DIRTY_PX: f64 = 2.2;
 /// The first view: a little to the side and above, so depth reads from the start.
 const THETA0: f64 = -30.0 * PI / 180.0;
 const PSI0: f64 = 20.0 * PI / 180.0;
@@ -250,6 +252,10 @@ struct NodeVis {
     r: f64,
     /// files under a folder
     files: f64,
+    /// a card with uncommitted changes: a dot at its upper right
+    dirty: bool,
+    /// a collapsed folder: a ring, and its file count beside it, while show all is off
+    collapsed: bool,
 }
 
 fn vis_of(idx: &Idx, n: &Node) -> NodeVis {
@@ -274,6 +280,8 @@ fn vis_of(idx: &Idx, n: &Node) -> NodeVis {
         fam,
         r,
         files,
+        dirty: kind == Kind::File && idx.dirty().get(&n.id).is_some_and(|s| !s.is_empty()),
+        collapsed: kind == Kind::Dir && is_collapsed(idx, &n.id),
     }
 }
 
@@ -300,6 +308,8 @@ struct Colors {
     rim_inset: f64,
     /// the walk target's edge, CSS px wide (`--graph-walk-w`)
     walk_w: f64,
+    /// an uncommitted card's dot (`--graph-dirty`)
+    dirty: [f32; 4],
     /// a dark background: halos add light rather than cover
     dark: bool,
 }
@@ -350,6 +360,7 @@ impl Colors {
             compass: (v("--graph-compass"), v("--graph-compass-far")),
             rim_inset: number("--graph-rim-inset", 34.0),
             walk_w: number("--graph-walk-w", 3.0),
+            dirty: c("--graph-dirty"),
         }
     }
     fn fam(&self, f: &str) -> [f32; 4] {
@@ -2242,6 +2253,36 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
             });
         }
     }
+    // cues on the points on the pane: an uncommitted card's dot at its upper right; a collapsed
+    // folder's ring, and the count of files under it beside the ring (on the overlay)
+    let mut dirty_ids: Vec<&str> = Vec::new();
+    let mut badges: Vec<overlay::Badge> = Vec::new();
+    if let Some(c) = gs.colors.as_ref() {
+        for &(s, i, x, y) in &items {
+            let i = i as usize;
+            let v = &gs.nodes[i];
+            if !(x >= 0.0 && y >= 0.0 && x <= pane.w && y <= pane.h) {
+                continue;
+            }
+            let r = (v.r * unit / s).clamp(1.6, POINT_MAX_PX);
+            if v.dirty {
+                let at = [x + r * 0.75, y - r * 0.75];
+                gly.marks.push(mark(at, DIRTY_PX, gl::mark::DISC, rgba(c.dirty, 1.0)));
+                dirty_ids.push(gs.ids[i].as_str());
+            }
+            if v.collapsed && !gs.show_all {
+                let rr = r + 3.0;
+                gly.marks.push(mark([x, y], rr, gl::mark::RING, rgba(c.fam(&v.fam), 0.9)));
+                badges.push(overlay::Badge {
+                    x: x + rr * 0.7,
+                    y: y - rr * 0.7,
+                    text: format!("{}", v.files as u64),
+                    id: gs.ids[i].to_string(),
+                });
+            }
+        }
+    }
+    let dirty_json = serde_json::to_string(&dirty_ids).unwrap_or_default();
     let mut picks: Vec<Pick> = items
         .iter()
         .rev()
@@ -2351,6 +2392,11 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
         far: c.compass.1.clone(),
         accent: accent_css.clone(),
     });
+    let badge_rects: Vec<labels::Rect> = gs
+        .ov
+        .as_ref()
+        .map(|ov| badges.iter().map(|b| ov.badge_rect(b)).collect())
+        .unwrap_or_default();
     let labels = place_labels(
         gs,
         now,
@@ -2361,6 +2407,7 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
         &names,
         &gly.at,
         compass.as_ref(),
+        &badge_rects,
     );
     if let Some(ov) = &gs.ov {
         ov.draw(
@@ -2370,9 +2417,14 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
             &accent_css,
             &rings,
             &labels.0,
+            &badges,
             compass.as_ref(),
         );
     }
+    let counts_json = serde_json::to_string(
+        &badges.iter().map(|b| [b.id.as_str(), b.text.as_str()]).collect::<Vec<_>>(),
+    )
+    .unwrap_or_default();
     gs.picks = picks;
     let (edges, gl_bundles) = counts?;
     let drawn = gl::Drawn {
@@ -2408,6 +2460,8 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
         walk_at: gs.walk_at.filter(|_| walk.is_some()).unwrap_or((0, 0)),
         walk_angle: walk.map(|(.., a)| a),
         peak: gs.peak,
+        dirty: dirty_json,
+        counts: counts_json,
     };
     Some((drawn, uploaded, labels))
 }
@@ -2433,6 +2487,7 @@ fn place_labels(
     names: &[Name],
     glyph_at: &[Option<[f64; 2]>],
     compass: Option<&overlay::Compass>,
+    badges: &[labels::Rect],
 ) -> (Vec<labels::Placed>, usize) {
     let Some(ov) = gs.ov.as_ref() else {
         return (Vec::new(), 0);
@@ -2559,6 +2614,7 @@ fn place_labels(
     obstacles.extend(gs.hint_rect);
     obstacles.extend(compass.map(|c| overlay::compass_box(gs.w, gs.h, c.lift)));
     obstacles.extend(focus_disc);
+    obstacles.extend_from_slice(badges);
     let anchors = &lab.anchors;
     let placed = labels::place(&cands, &obstacles, (gs.w, gs.h), &|k| {
         anchors.get(&k).copied()
