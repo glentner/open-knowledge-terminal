@@ -3,7 +3,7 @@ slug: graph-galaxy
 title: The graph as a navigable 3D space (galaxy, system, focus)
 kind: feature
 appetite: big
-status: in_review
+status: blocked
 branch: feat/graph-galaxy
 base: main
 current_phase: done
@@ -96,10 +96,10 @@ phases:
   attempts: 1
   verify: sh spec/graph-galaxy/verify/gate.sh P7
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 199aec28910167734b8bd275fb2e11121fb8c5cf
+  verdict: changes-requested
+  blocked_reason: 'review cycle 1: H1, M1-M5, L1-L2 (R2, R4, R5, R7)'
+  cycle: 1
 ---
 
 # TECH.md — The graph as a navigable 3D space (galaxy, system, focus)
