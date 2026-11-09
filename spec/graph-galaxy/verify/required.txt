@@ -3,15 +3,15 @@
 # pass. What each must assert is in TECH.md's phase body; code-review grades the bodies.
 P1|graph::space::tests::deterministic
 P1|graph::space::tests::order_independent
-P1|graph::space::tests::r10_existing_folder
-P1|graph::space::tests::r10_new_subfolder
-P1|graph::space::tests::r10_new_chain
-P1|graph::space::tests::r10_new_region_first
-P1|graph::space::tests::r10_new_region_last
-P1|graph::space::tests::r10_root
-P1|graph::space::tests::r10_new_surface
+P1|graph::space::tests::add_existing_folder
+P1|graph::space::tests::add_new_subfolder
+P1|graph::space::tests::add_new_chain
+P1|graph::space::tests::add_new_region_first
+P1|graph::space::tests::add_new_region_last
+P1|graph::space::tests::add_root
+P1|graph::space::tests::add_new_surface
 P1|graph::space::tests::uncommitted_after_committed
-P1|graph::space::tests::r10_property
+P1|graph::space::tests::add_property
 P1|graph::space::tests::spread
 P2|graph::cam::tests::basis_orthonormal
 P2|graph::cam::tests::project_matches_matrices

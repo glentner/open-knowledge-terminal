@@ -3,10 +3,10 @@ slug: graph-galaxy
 title: The graph as a navigable 3D space (galaxy, system, focus)
 kind: feature
 appetite: big
-status: blocked
+status: in_progress
 branch: feat/graph-galaxy
 base: main
-current_phase: done
+current_phase: P2
 last_updated: '2026-11-08'
 phases:
 - id: P1
@@ -19,10 +19,10 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 1
-  verify: sh spec/graph-galaxy/verify/gate.sh P1
+  verify: sh spec/graph-galaxy/verify/gate.sh P7
 - id: P2
   name: WebGL2 scene and the orbit camera
-  status: done
+  status: in_progress
   satisfies:
   - R7
   - R11
@@ -31,10 +31,10 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/graph-galaxy/verify/gate.sh P2
+  verify: sh spec/graph-galaxy/verify/gate.sh P7
 - id: P3
   name: Galaxy and system scales, show all
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -43,10 +43,10 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/graph-galaxy/verify/gate.sh P3
+  verify: sh spec/graph-galaxy/verify/gate.sh P7
 - id: P4
   name: Focus scale and visibility tiers
-  status: done
+  status: in_progress
   satisfies:
   - R3
   - R8
@@ -56,7 +56,7 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 1
-  verify: sh spec/graph-galaxy/verify/gate.sh P4
+  verify: sh spec/graph-galaxy/verify/gate.sh P7
 - id: P5
   name: Flat label overlay and compass
   status: done
@@ -70,7 +70,7 @@ phases:
   verify: sh spec/graph-galaxy/verify/gate.sh P5
 - id: P6
   name: z framing and the angular walk with portals
-  status: done
+  status: in_progress
   satisfies:
   - R4
   - R5
@@ -80,10 +80,10 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/graph-galaxy/verify/gate.sh P6
+  verify: sh spec/graph-galaxy/verify/gate.sh P7
 - id: P7
   name: Warp flight, history, frame-time gate and ledger
-  status: done
+  status: in_progress
   satisfies:
   - R6
   - R11
@@ -196,6 +196,18 @@ per-phase checklists below are the work. `code-build` executes the next actionab
   is always `borrow_mut`, so a nested call panics. keys.mjs fails on a page error or a console message
   holding "panicked at" or "already borrowed" (add the console listener in P1).
 
+### Review cycle 1 remediation (2026-11-08)
+
+`REVIEW.md` cycle 1 asked for changes (H1, M1–M5, L1–L2; foreman triage in its § Triage). Each
+finding is fixed as its property, across its whole domain, in the phase that owns it: H1 in P1
+(the shader's part in P4, the commit that touches `gl.rs` with `app.css`), M1 in P2, M3 in P3
+(R2's phase, though the placer is P5's module), L2 in P4, M2 and M4 in P6, M5 and L1 in P7. The
+amendment in each phase body says what changed. P1, P2, P3, P4, P6 and P7 were reopened; P5 was
+not (no finding is R9's). Every reopened gate is P7's cumulative gate (`gate.sh P7`): it was run
+once, on the combined tree with every fix staged, and stood in for all six; the phases were then
+committed apart, in order (code-build Step 1.3). Each finding's new check was seen red against a
+mutant of its fix before the gate run.
+
 ---
 
 ## Phase P1 — Deterministic 3D layout
@@ -224,15 +236,15 @@ graph keeps painting.
       surfaces. The fixture gives every committed folder an `ft`.
   - `deterministic`: run twice, compare bitwise.
   - `order_independent`: seeded shuffles of nodes.
-  - `r10_existing_folder`.
-  - `r10_new_subfolder`.
-  - `r10_new_chain`: two new folders deep.
-  - `r10_new_region_first` and `r10_new_region_last`: names sorting before and after every region.
-  - `r10_root`.
-  - `r10_new_surface`: a new surface node moves nothing else.
+  - `add_existing_folder`.
+  - `add_new_subfolder`.
+  - `add_new_chain`: two new folders deep.
+  - `add_new_region_first` and `add_new_region_last`: names sorting before and after every region.
+  - `add_root`.
+  - `add_new_surface`: a new surface node moves nothing else.
   - `uncommitted_after_committed`: a folder without `ft` takes its slot after every committed
     sibling, whatever its name, and two uncommitted siblings order by path.
-  - `r10_property`: 200 random single additions, mixing existing folders, new subfolders, new
+  - `add_property`: 200 random single additions, mixing existing folders, new subfolders, new
     regions and root.
   - `spread`: region min angle ≥ 25° on a 21-region fixture, within-folder min distance ≥ 0.95 × 10,
     no NaN.
@@ -244,6 +256,16 @@ graph keeps painting.
 - [x] `tests/ui/keys.mjs`: the P1 rows of `verify/checks.txt`, plus a console listener that fails the
       run on "panicked at" or "already borrowed". The probe writes go to `$OKT_KB`, the env.sh clone,
       never `~/KB`.
+- *Amended in review-cycle-1 remediation (2026-11-08), H1:* no spec id in source, in any case
+  form. The R10 tests above are named `add_*` (they were `r10_*`). Names that read as ids are
+  renamed too: `GLYPH_R0`/`SUB_R0` → `GLYPH_BASE`/`SUB_BASE` (`graph.rs`), the warp's `r0`/`r1` →
+  `r_start`/`r_end` (`cam.rs`), test locals in `cam.rs` and `vis.rs`, and two locals in
+  `keys.mjs`; the mark shader's `p0`/`p1` in `gl.rs` go in P4's commit. `verify/static.sh` now fails
+  `R<n>`/`P<n>` in any case and as any part of a name, an underscore counting as a boundary (only
+  `::CONST` paths and the percentile keys p50, p90, p95 and p99 pass). It was seen red on a planted
+  `r10_planted` test, which the old scan let through. `verify/required.txt` takes the new names.
+  `AGENTS.md` § Conventions already states the rule; it is kept by hand (the scan is this cycle's
+  gate, a record once the spec lands). Touches `graph/cam.rs`, `graph/vis.rs` beyond the list.
 - **Verify:** `sh spec/graph-galaxy/verify/gate.sh P1`.
 - **Touches:** `okt-client/src/model.rs`, `okt-client/src/graph.rs`, `okt-client/src/graph/space.rs`,
   `tests/ui/keys.mjs`. No `app.css` change: P1 changes no paint.

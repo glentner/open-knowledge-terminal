@@ -871,18 +871,18 @@ const sameAt = (a, b) => { const ks = Object.keys(a || {}); return ks.length > 0
   await waits(() => go('#v=graph&s=' + encodeURIComponent(card)));
   await page.evaluate(() => document.activeElement?.blur());
   const c0 = await cam();
-  const p0 = await page.evaluate(() => window.__oktPos);
+  const posA = await page.evaluate(() => window.__oktPos);
   for (let k = 0; k < 4; k++) await waits(() => page.keyboard.press('ArrowRight'));
   const c1 = await cam();
   const h0 = await page.evaluate(() => history.length);
   await waits(() => page.keyboard.press('z'));
   const c2 = await cam();
-  const p1 = await page.evaluate(() => window.__oktPos);
+  const posB = await page.evaluate(() => window.__oktPos);
   const h1 = await page.evaluate(() => history.length);
   const turned = Math.max(Math.abs(dang(c1.theta, c2.theta)), Math.abs(c2.psi - c1.psi));
   check('z re-solves the camera and keeps the layout',
-    Math.abs(Math.abs(dang(c0.theta, c1.theta)) - 60) <= 1 && turned >= 5 && c2.move !== c1.move && !!c0.layout && c2.layout === c0.layout && c2.posHash === c0.posHash && sameAt(p0, p1) && h1 === h0 && c2.sel === card,
-    { card, orbit: +dang(c0.theta, c1.theta).toFixed(1), turned: +turned.toFixed(1), layout: c2.layout === c0.layout, posHash: c2.posHash === c0.posHash, positions: sameAt(p0, p1), history: [h0, h1], sel: c2.sel });
+    Math.abs(Math.abs(dang(c0.theta, c1.theta)) - 60) <= 1 && turned >= 5 && c2.move !== c1.move && !!c0.layout && c2.layout === c0.layout && c2.posHash === c0.posHash && sameAt(posA, posB) && h1 === h0 && c2.sel === card,
+    { card, orbit: +dang(c0.theta, c1.theta).toFixed(1), turned: +turned.toFixed(1), layout: c2.layout === c0.layout, posHash: c2.posHash === c0.posHash, positions: sameAt(posA, posB), history: [h0, h1], sel: c2.sel });
 }
 {
   await waits(() => go('#v=graph&s=' + encodeURIComponent(outer)));

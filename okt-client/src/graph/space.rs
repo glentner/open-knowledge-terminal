@@ -741,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    fn r10_existing_folder() {
+    fn add_existing_folder() {
         let f = fixture();
         assert_local(&f, &[card("m05/zz-new.md", "m05", None)], "m05");
         assert_local(&f, &[card("m05/aa-new.md", "m05", None)], "m05");
@@ -763,7 +763,7 @@ mod tests {
     }
 
     #[test]
-    fn r10_new_subfolder() {
+    fn add_new_subfolder() {
         let f = fixture();
         assert_local(
             &f,
@@ -783,7 +783,7 @@ mod tests {
     }
 
     #[test]
-    fn r10_new_chain() {
+    fn add_new_chain() {
         let f = fixture();
         assert_local(
             &f,
@@ -797,7 +797,7 @@ mod tests {
     }
 
     #[test]
-    fn r10_new_region_first() {
+    fn add_new_region_first() {
         let f = fixture();
         assert_local(
             &f,
@@ -807,7 +807,7 @@ mod tests {
     }
 
     #[test]
-    fn r10_new_region_last() {
+    fn add_new_region_last() {
         let f = fixture();
         assert_local(
             &f,
@@ -817,14 +817,14 @@ mod tests {
     }
 
     #[test]
-    fn r10_root() {
+    fn add_root() {
         let f = fixture();
         assert_local(&f, &[card("aa-root.md", ".", None)], ".");
         assert_local(&f, &[card("zz-root.md", ".", None)], ".");
     }
 
     #[test]
-    fn r10_new_surface() {
+    fn add_new_surface() {
         let f = fixture();
         // no cards are exempt: a surface belongs to no folder
         assert_local(&f, &[surface("@aaa")], "");
@@ -890,7 +890,7 @@ mod tests {
     }
 
     #[test]
-    fn r10_property() {
+    fn add_property() {
         let f = fixture();
         let dirs: Vec<String> = f
             .iter()

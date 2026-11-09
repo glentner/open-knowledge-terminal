@@ -45,11 +45,13 @@ pure() {
 dirty=$(git status --porcelain --untracked-files=all -- okt-client okt-server okt-pygments tests README.md AGENTS.md issues ROADMAP.md \
   | grep -Ev '^(M|A|D|R)  ' )
 if [ -z "$dirty" ]; then ok "work is staged, nothing untracked or unstaged"; else no "work is staged, nothing untracked or unstaged"; echo "$dirty" | head -5; fi
-# No spec ids in source or tests (AGENTS.md § Conventions): added lines only. Paths such as
-# WebGl2RenderingContext::R8 are not ids.
+# No spec ids in source or tests (AGENTS.md § Conventions): added lines only, in any case form
+# and as any part of a name (R10, r10, r10_property, test_p7, GLYPH_R0). An underscore is a
+# boundary, so a name built on an id fails too. Not ids: paths such as
+# WebGl2RenderingContext::R8, and the percentile keys p50, p90, p95 and p99.
 ids=$(git diff --cached -U0 "$base" -- okt-client okt-server okt-pygments tests 2>/dev/null \
-  | grep '^+' | grep -v '^+++' | sed -E 's/::[A-Z][A-Z0-9_]*//g' \
-  | grep -E '(^|[^A-Za-z0-9_])[RP][0-9]{1,2}([^A-Za-z0-9_]|$)')
+  | grep '^+' | grep -v '^+++' | sed -E 's/::[A-Z][A-Z0-9_]*//g; s/(^|[^A-Za-z0-9])p(50|90|95|99)([^A-Za-z0-9]|$)/\1\3/g; s/(^|[^A-Za-z0-9])p(50|90|95|99)([^A-Za-z0-9]|$)/\1\3/g' \
+  | grep -E '(^|[^A-Za-z0-9])[RrPp][0-9]{1,2}([^A-Za-z0-9]|$)')
 if [ -z "$ids" ]; then ok "no spec ids in added source lines"; else no "no spec ids in added source lines"; echo "$ids" | head -5; fi
 # app.css changes with the paint, per phase (AGENTS.md § Conventions): the paint files are the GL
 # renderer, the overlay, and the label placer

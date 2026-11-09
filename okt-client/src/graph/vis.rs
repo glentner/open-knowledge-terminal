@@ -872,11 +872,11 @@ mod tests {
         }
         // one match: the rest of its region is drawn faint, nothing else
         let c1 = [i("a/x.md")];
-        let r1 = [v.region[c1[0]]];
+        let reg1 = [v.region[c1[0]]];
         let f1 = Focus {
             centre: &c1,
             kids: &[],
-            regions: &r1,
+            regions: &reg1,
             links: false,
         };
         let t1 = tiers(&v, &f1, &folder, &fold, false);

@@ -79,10 +79,10 @@ const FIT_PAD: f64 = 12.0;
 /// Room around a focus fit's cards: a card's radius (the flat labels find their own room).
 const FOCUS_PAD: f64 = CARD_R;
 /// A region glyph's halo: this world radius plus this much per square root of its cards.
-const GLYPH_R0: f64 = 14.0;
+const GLYPH_BASE: f64 = 14.0;
 const GLYPH_K: f64 = 6.0;
 /// A subfolder's glyph at system scale, likewise per square root of its files.
-const SUB_R0: f64 = 6.0;
+const SUB_BASE: f64 = 6.0;
 const SUB_K: f64 = 3.0;
 /// A glyph's dot at its core, and a rim glyph, in CSS px.
 const DOT_PX: f64 = 2.5;
@@ -1946,7 +1946,7 @@ fn glyphs(gs: &G, pose: &Pose, pane: Pane, unit: f64) -> Glyphs {
         let core = gs.space.regions[r].core;
         let cards = gs.vis.cards.get(r).copied().unwrap_or(0) as f64;
         let col = fam_of(r);
-        let world = GLYPH_R0 + GLYPH_K * cards.sqrt();
+        let world = GLYPH_BASE + GLYPH_K * cards.sqrt();
         let proj = cam::project(core, pose, pane);
         let active = gs.region == Some(r) && gs.scale != Scale::Galaxy;
         let (p, alpha, radius) = if active {
@@ -2028,7 +2028,7 @@ fn glyphs(gs: &G, pose: &Pose, pane: Pane, unit: f64) -> Glyphs {
     for &i in &gs.subs {
         if let Some([x, y, s]) = cam::project(gs.space.pos[i], pose, pane) {
             let v = &gs.nodes[i];
-            let world = SUB_R0 + SUB_K * v.files.sqrt();
+            let world = SUB_BASE + SUB_K * v.files.sqrt();
             out.halos.push(mark(
                 [x, y],
                 halo_px(world, s),
@@ -2060,12 +2060,12 @@ fn glyphs(gs: &G, pose: &Pose, pane: Pane, unit: f64) -> Glyphs {
     let mut pseudo = vec![(
         [0.0; 3],
         c.accent,
-        GLYPH_R0 * 0.7 + 4.0 * n_root.sqrt(),
+        GLYPH_BASE * 0.7 + 4.0 * n_root.sqrt(),
         gl::mark::DISC,
         root.or_else(|| gs.at.get(".").copied()),
     )];
     if let (true, Some(sr)) = (gs.n_surf > 0, gs.space.regions.get(1)) {
-        let world = GLYPH_R0 * 0.7 + 4.0 * (gs.n_surf as f64).sqrt();
+        let world = GLYPH_BASE * 0.7 + 4.0 * (gs.n_surf as f64).sqrt();
         pseudo.push((sr.core, c.fam("world"), world, gl::mark::RING, None));
     }
     for (p, col, world, style, pick) in pseudo {

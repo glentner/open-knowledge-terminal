@@ -244,7 +244,8 @@ pub struct Warp {
     to: Pose,
     /// the pan distance; 0 on the log-lerp
     dist: f64,
-    r0: f64,
+    /// the path parameter `r` at the start, ln(√(b₀²+1) − b₀)
+    r_start: f64,
     /// the path's length in its own parameter
     len: f64,
     /// where along the flight (0–1) the lift is anchored: the path's own top, kept off the ends
@@ -267,7 +268,7 @@ pub fn warp(from: &Pose, to: &Pose, floor: f64, cap: f64) -> Warp {
         from: *from,
         to: *to,
         dist: 0.0,
-        r0: 0.0,
+        r_start: 0.0,
         len: 0.0,
         apex: 0.5,
         lift: 0.0,
@@ -278,17 +279,17 @@ pub fn warp(from: &Pose, to: &Pose, floor: f64, cap: f64) -> Warp {
         let b0 = (w1 * w1 - w0 * w0 + rho4 * dist * dist) / (2.0 * w0 * rho2 * dist);
         let b1 = (w1 * w1 - w0 * w0 - rho4 * dist * dist) / (2.0 * w1 * rho2 * dist);
         // ln(√(b²+1) − b), stably
-        let (r0, r1) = (-b0.asinh(), -b1.asinh());
-        let len = (r1 - r0) / RHO;
+        let (r_start, r_end) = (-b0.asinh(), -b1.asinh());
+        let len = (r_end - r_start) / RHO;
         if len.is_finite() && len > 0.0 {
             w.dist = dist;
-            w.r0 = r0;
+            w.r_start = r_start;
             w.len = len;
         }
     }
-    // the path's own top: where cosh(ρs + r0) is least, or the higher end of a log-lerp
+    // the path's own top: where cosh(ρs + r_start) is least, or the higher end of a log-lerp
     let top = if w.dist > 0.0 {
-        -w.r0 / RHO / w.len
+        -w.r_start / RHO / w.len
     } else if to.ln_d > from.ln_d {
         1.0
     } else {
@@ -305,7 +306,7 @@ impl Warp {
     fn base_ln_d(&self, e: f64) -> f64 {
         if self.dist > 0.0 {
             let s = e * self.len;
-            self.from.ln_d + ln_cosh(self.r0) - ln_cosh(RHO * s + self.r0)
+            self.from.ln_d + ln_cosh(self.r_start) - ln_cosh(RHO * s + self.r_start)
         } else {
             self.from.ln_d + (self.to.ln_d - self.from.ln_d) * e
         }
@@ -317,7 +318,7 @@ impl Warp {
             let w0 = 2.0 * self.from.d() * ty;
             let s = e * self.len;
             w0 / (RHO * RHO * self.dist)
-                * (self.r0.cosh() * (RHO * s + self.r0).tanh() - self.r0.sinh())
+                * (self.r_start.cosh() * (RHO * s + self.r_start).tanh() - self.r_start.sinh())
         } else {
             e
         }
@@ -955,11 +956,11 @@ mod tests {
             psi: 0.6,
             ln_d: 7.5,
         };
-        let p0 = ease_pose(&a, &b, 0.0);
-        let p1 = ease_pose(&a, &b, 1.0);
-        assert_eq!(p0, a);
-        assert!((p1.theta - b.theta).abs() < 1e-15 && p1.psi == b.psi && p1.ln_d == b.ln_d);
-        assert_eq!(p1.target, b.target);
+        let start = ease_pose(&a, &b, 0.0);
+        let end = ease_pose(&a, &b, 1.0);
+        assert_eq!(start, a);
+        assert!((end.theta - b.theta).abs() < 1e-15 && end.psi == b.psi && end.ln_d == b.ln_d);
+        assert_eq!(end.target, b.target);
         // ln d moves linearly in the eased parameter: an even zoom
         for i in 0..=10 {
             let e = i as f64 / 10.0;
