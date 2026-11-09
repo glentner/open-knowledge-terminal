@@ -11,10 +11,10 @@ appetite: big
 
 ## Problem
 
-okt's tests are the Rust unit tests, `tests/ui/keys.mjs`, `tests/ui/history.mjs` and
-`tests/ui/soak.mjs`. Nothing checks the JSON API, raw files, the watcher or the rendered panes end
-to end, so a regression there reaches the installed okt unseen, and the release gate is
-correspondingly thin.
+okt's tests are the Rust unit tests, `tests/ui/keys.mjs`, `tests/ui/history.mjs`,
+`tests/ui/panes.mjs` (the pane arrangement) and `tests/ui/soak.mjs`. Nothing checks the JSON API,
+raw files, the watcher or the rendered panes end to end, so a regression there reaches the
+installed okt unseen, and the release gate is correspondingly thin.
 
 ## Evidence
 

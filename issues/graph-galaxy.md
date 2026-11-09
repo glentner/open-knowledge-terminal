@@ -124,8 +124,8 @@ distance from the focus, and stop drawing most of the graph.
 
 - Proposed non-goals: no change to `/api/index` (`index.rs` `snapshot()` is high-blast-radius)
   unless the GOAL argues for one; no space-themed styling; no physics simulation at runtime.
-- Related: `issues/pane-arrangements.md`. The graph will live in panes of any shape, so the camera
-  fits its pane, not the window.
+- Related: pane arrangements, shipped 2026-11-09 (`spec/pane-arrangements/`). The graph lives in
+  panes of any shape, each its own size container, so the camera fits its pane, not the window.
 - Found by: Geoffrey, chat 2026-11-08 (story 3, KB `workspace/open-knowledge-terminal/stories.md`).
 - **First attempt archived, 2026-11-08.** A free 3D camera over galaxy, system and focus scales,
   built through two review cycles, was stopped by Geoffrey after a preview: it lost the per-region

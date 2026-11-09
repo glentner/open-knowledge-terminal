@@ -35,16 +35,8 @@ output.
 
 # Part II — Views
 
-The current run, in order. Each entry is one feature cycle. Re-ordered 2026-11-08: the graph
-rebuild is on ice (below), and the small cycles go first.
-
-### 2. Pane arrangements
-
-The view pane and the inspector are fixed left and right. Make panes placeable, swappable,
-stackable and collapsible, with saved arrangements, so a third view (the dream inbox, an agent chat)
-has somewhere to go.
-
-**Seed:** [`issues/pane-arrangements.md`](issues/pane-arrangements.md)
+The views run has shipped its cycles: the Files columns on 2026-11-08, Compact History and pane
+arrangements on 2026-11-09. The graph rebuild is on ice (below).
 
 ### On ice: the graph as a navigable space
 
@@ -60,14 +52,14 @@ A restart begins with concept art, with Geoffrey at every step.
 
 Small follow-ups found while the views run was being reviewed.
 
-### 3. Count cells sized in characters
+### 2. Count cells sized in characters
 
 The History and Log counts cells are sized in pixels for the default font, so a wider `--font` cuts
 their counts. Size them, and the thresholds derived from them, in `ch`.
 
 **Seed:** [`issues/font-relative-count-cells.md`](issues/font-relative-count-cells.md)
 
-### 4. Literal tokens drawn as source rows
+### 3. Literal tokens drawn as source rows
 
 The source-row rule `.src .l` also matches Pygments' literal token class `l`, so with the blame on
 a YAML scalar becomes a row grid with its own gutter, and the Inspector scrolls sideways. Scope the
