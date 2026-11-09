@@ -1,0 +1,32 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: history-log-rows
+escaped_from: null
+planned: {date: '2026-11-08', phases: 1}
+landed: {date: '2026-11-09', phases: 1, failed_verifies: 0}
+open: null
+runs:
+- {step: feature, start: '2026-11-08T21:50:21-05:00', stop: '2026-11-08T21:54:36-05:00', seconds: 255, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-11-08T21:54:36-05:00', stop: '2026-11-08T22:49:56-05:00', seconds: 3320, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-11-08T22:49:56-05:00', stop: '2026-11-08T22:56:51-05:00', seconds: 415, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-08T22:56:51-05:00', stop: '2026-11-08T23:16:48-05:00', seconds: 1197, end: gate, agent: claude-opus-5-5}
+- {step: 'build:remediation-1', start: '2026-11-08T23:16:48-05:00', stop: '2026-11-08T23:33:09-05:00', seconds: 981, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-08T23:33:09-05:00', stop: '2026-11-08T23:52:17-05:00', seconds: 1148, end: gate, agent: claude-opus-5-5}
+- {step: 'build:remediation-2', start: '2026-11-08T23:52:17-05:00', stop: '2026-11-09T00:03:10-05:00', seconds: 653, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-09T00:03:11-05:00', stop: '2026-11-09T00:30:40-05:00', seconds: 1649, end: gate, agent: claude-opus-5-5}
+- {step: publish, start: '2026-11-09T00:30:40-05:00', stop: '2026-11-09T00:31:47-05:00', seconds: 67, end: done, agent: claude-opus-5-5}
+reviews:
+- cycle: 1
+  date: '2026-11-08'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 1, low: 1}
+  plausible: 0
+- cycle: 2
+  date: '2026-11-08'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 1, low: 0}
+  plausible: 0
+- cycle: 3
+  date: '2026-11-09'
+  verdict: approved
+  confirmed: {critical: 0, high: 0, medium: 0, low: 1}
+  plausible: 0

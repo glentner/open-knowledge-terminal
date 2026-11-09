@@ -62,6 +62,17 @@ A restart begins with concept art, with Geoffrey at every step.
 
 **Seed:** [`issues/graph-galaxy.md`](issues/graph-galaxy.md)
 
+# Part III — Polish
+
+Small follow-ups found while the views run was being reviewed.
+
+### 5. Count cells sized in characters
+
+The History and Log counts cells are sized in pixels for the default font, so a wider `--font` cuts
+their counts. Size them, and the thresholds derived from them, in `ch`.
+
+**Seed:** [`issues/font-relative-count-cells.md`](issues/font-relative-count-cells.md)
+
 ---
 
 ## Settled questions

@@ -402,6 +402,24 @@ a { color: inherit; }
 .hrow .rt button { color: var(--dim); margin-left: 6px; }
 .hrow .rt button:hover { color: var(--accent-text); }
 .hrow .px { color: var(--dim); }
+/* History's rows: one line, the Log's row height (the Overview's Last commit keeps the plain .hrow).
+   Each row is its own size container, so the query below reads the width its cells share: #ibody's
+   own width counts its scrollbar in a container query */
+.hrow.hl { grid-template-columns: 64px max-content 18px minmax(0, 1fr) max-content; height: 21px; padding: 0 12px; align-items: center; white-space: nowrap; container-type: inline-size; }
+/* the actions, a fixed 118.5px cell: the counts in a 105px box (14 characters at 7.5px, after the
+   Log's 96px column), cut with "…" when wider (their full text is the hover text), then 6px and a
+   slot for @ on every row, so every row's fixed parts are the same width */
+.hrow.hl .rt { display: flex; gap: 6px; width: 118.5px; }
+.hrow.hl .rt button { margin-left: 0; }
+.hrow.hl .ad { flex: none; width: 105px; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+/* a row's content narrower than its cells with an empty subject: 64 hash, 37.5 time (5 characters
+   at 7.5px), 18 status, four 8px gaps and the 118.5px actions make 270px (296px of #ibody with the
+   row's padding and border). Below it the subject is already at 0, so the counts go and the actions
+   shrink to @ alone: hash, time, status and @ stay, in 185px of #ibody */
+@container (width < 270px) {
+  .hrow.hl .rt { width: auto; }
+  .hrow.hl .ad { display: none; }
+}
 
 /* content toolbar */
 .ctool { position: sticky; top: 0; z-index: 3; display: flex; gap: 6px; align-items: center; padding: 5px 12px; background: var(--bg-2); border-bottom: 1px solid var(--line); }

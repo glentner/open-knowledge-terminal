@@ -16,6 +16,8 @@ Browser suites run against a server, normally the throwaway one (`tests/env.sh`,
 giving up columns by priority as its pane narrows, the Name cell's hover path, and the row geometry
 of the Log, Table, Results and Paths views. That section writes fixtures into `$OKT_KB`, the
 throwaway clone, so it runs only under `tests/env.sh` and prints a skip line anywhere else.
+`tests/ui/history.mjs` covers the inspector's History tab (its rows, day rules and widths; it
+commits a large-counts file to the clone, so it runs only under `tests/env.sh`).
 `tests/ui/soak.mjs` checks that memory and listeners plateau on a page left open;
 `tests/perf/profile.mjs` measures main-thread cost and frame pacing, and `tests/perf/compare.py`
 compares two runs. They need Playwright (`npm install` in `tests/`).

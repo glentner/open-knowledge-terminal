@@ -51,7 +51,7 @@ Useful flags: `--theme terminal|dark|light`, `--accent '#ffa028'`, `--font "Berk
 | `okt-pygments/` | Syntax highlighting that reproduces Pygments' HTML output exactly (lexer tables exported from Pygments by `tools/pygments/export.py`, run by a Rust port of Pygments' lexer engine). |
 | `vendor/markdown-it/` | markdown-it 0.6.1 with one fix (emphasis source maps across stripped line prefixes); see `Cargo.toml` `[patch.crates-io]`. |
 | `tests/env.sh` | A throwaway okt server on 6581 over a fresh clone of the KB, to run the browser tests against. |
-| `tests/ui/` | Browser tests: the navigation keys (see Keys) and the Files columns, and a soak test for a page left open all day. |
+| `tests/ui/` | Browser tests: the navigation keys (see Keys), the Files columns, the inspector's History tab, and a soak test for a page left open all day. |
 | `tests/perf/` | Main-thread cost and frame pacing of a fixed set of interactions, compared across two builds. |
 
 ## Tests
@@ -59,6 +59,7 @@ Useful flags: `--theme terminal|dark|light`, `--accent '#ffa028'`, `--font "Berk
 ```sh
 make test                                                   # unit tests
 tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/keys.mjs"'     # the navigation keys, the Files columns
+tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/history.mjs"'  # the History tab
 tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/soak.mjs" "$OKT_KB" "$OKT"'
 ```
 

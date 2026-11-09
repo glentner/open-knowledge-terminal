@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:history-log-rows
 kind: feature
 appetite: small
 ---

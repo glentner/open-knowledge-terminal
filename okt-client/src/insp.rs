@@ -1835,9 +1835,7 @@ async fn history_view(idx: &Idx, n: Option<&Node>) -> Result<String, String> {
             "<div class=\"sect\"><div class=\"sh\">Repository history <span class=\"c\">{} commits</span></div></div>",
             fmt_n(data.total)
         );
-        for c in data.commits.iter().take(300) {
-            html.push_str(&hrow(c, None));
-        }
+        html.push_str(&hrows(&data.commits[..data.commits.len().min(300)], None));
         if data.total > 300.0 {
             html.push_str("<div class=\"empty\"><button class=\"btn\" data-view=\"log\">OPEN THE FULL LOG</button></div>");
         }
@@ -1868,9 +1866,7 @@ async fn history_view(idx: &Idx, n: Option<&Node>) -> Result<String, String> {
         },
         commits.len()
     );
-    for c in commits.iter() {
-        html.push_str(&hrow(c, Some(n)));
-    }
+    html.push_str(&hrows(&commits, Some(n)));
     Ok(html)
 }
 
@@ -1913,7 +1909,32 @@ fn sparkline(commits: &[Commit]) -> String {
     )
 }
 
-/// `hrow(c, n)`
+/// History's rows in the order given, with the Log's day rule (`date_string · N`) before each run
+/// of commits on one local day; N is the length of the run, the rows under that rule. A day that
+/// recurs after another day's run gets a rule of its own, so every row sits under its own day.
+fn hrows(commits: &[Commit], n: Option<&Node>) -> String {
+    let mut html = String::new();
+    let mut i = 0;
+    while i < commits.len() {
+        let dk = fmt::day_key(commits[i].t);
+        let run = commits[i..]
+            .iter()
+            .take_while(|c| fmt::day_key(c.t) == dk)
+            .count();
+        html.push_str(&format!(
+            "<div class=\"dayrule\">{} · {}</div>",
+            esc(&js::date_string(commits[i].t)),
+            num(run as f64)
+        ));
+        for c in &commits[i..i + run] {
+            html.push_str(&hrow(c, n));
+        }
+        i += run;
+    }
+    html
+}
+
+/// `hrow(c, n)`: one History row, its time as `HH:MM` (the day is on the rule above it)
 fn hrow(c: &Commit, n: Option<&Node>) -> String {
     let is_file = n.map(|n| n.t == "file").unwrap_or(false);
     let st = c.st.clone().unwrap_or_default();
@@ -1936,16 +1957,17 @@ fn hrow(c: &Commit, n: Option<&Node>) -> String {
         }
         _ => String::new(),
     };
+    // the counts sit in their own fixed-width box (`.ad`), cut with "…" when wider; the full text
+    // is their hover text
+    let (a, d) = (fmt_n(c.a), fmt_n(c.d));
     format!(
-        "<div class=\"hrow\" data-commit=\"{}\"><span class=\"h\">{}</span><span class=\"dt\">{}</span><span class=\"st\">{}</span><span class=\"sj\" title=\"{}\">{}{px}</span><span class=\"rt\"><span class=\"plus\">+{}</span> <span class=\"minus\">−{}</span>{at}</span></div>",
+        "<div class=\"hrow hl\" data-commit=\"{}\"><span class=\"h\">{}</span><span class=\"dt\">{}</span><span class=\"st\">{}</span><span class=\"sj\" title=\"{}\">{}{px}</span><span class=\"rt\"><span class=\"ad\" title=\"+{a} −{d}\"><span class=\"plus\">+{a}</span> <span class=\"minus\">−{d}</span></span>{at}</span></div>",
         c.h,
         short(&c.h),
-        fmt::dt(c.t),
+        fmt::time(c.t),
         esc(&st),
         esc(&c.s),
         esc(&c.s),
-        fmt_n(c.a),
-        fmt_n(c.d)
     )
 }
 
