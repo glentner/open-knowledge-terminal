@@ -80,6 +80,15 @@ no mark. Show and mark its row wherever it is in the group.
 
 **Seed:** [`issues/walk-mark-chip-cap.md`](issues/walk-mark-chip-cap.md)
 
+### 8. A safe, current perf profile
+
+The legacy `tests/perf/profile.mjs` mode, like `tests/ui/keys.mjs`, falls back to the live server
+on 6580 when given no target, reads fixed screen points that only fit the retired 2D graph, and
+throws when `points.json` is empty. Make both refuse to run without a target, and profile the 3D
+graph by card id.
+
+**Seed:** [`issues/perf-profile-points.md`](issues/perf-profile-points.md)
+
 ---
 
 ## Settled questions

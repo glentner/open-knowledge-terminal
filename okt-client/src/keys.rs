@@ -399,8 +399,9 @@ fn on_key(e: KeyboardEvent) {
     }
     // Walk the graph from the keyboard (README § Keys). j and k step through the selection's
     // connections clockwise in screen order, around the selection from 12 o'clock; Enter or space
-    // goes to the one marked, or else opens or closes the selected folder (space, Enter) or shows
-    // a file's content (Enter).
+    // flies to the one marked (the camera rises toward the galaxy and descends on it, and the
+    // selection pushes a history entry, so [ comes back), or else opens or closes the selected
+    // folder (space, Enter) or shows a file's content (Enter).
     if view == "graph" {
         let walked = match k.as_str() {
             "j" | "ArrowDown" => {
@@ -413,7 +414,13 @@ fn on_key(e: KeyboardEvent) {
             }
             "Enter" | " " => {
                 if let Some(t) = graph::walk_target() {
-                    nav::select(Some(&t), SelOpts::default());
+                    nav::select(
+                        Some(&t),
+                        SelOpts {
+                            warp: true,
+                            ..Default::default()
+                        },
+                    );
                 } else if let Some(id) = sel.as_deref() {
                     if idx.is_dir(id) {
                         let r = graph::rep_of(id);

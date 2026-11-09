@@ -501,6 +501,8 @@ a { color: inherit; }
 .ttrack .a { color: var(--dim); }
 .ttrack .new { background: var(--accent); color: var(--accent-ink); font-weight: 800; padding: 0 4px; }
 @keyframes tick { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+/* reduced motion: the ticker and the live dot stop; the graph's camera reads the same query at
+   the start of every move and cuts to the end of it (an ease, a zoom, a flight, back and forward) */
 @media (prefers-reduced-motion: reduce) { .ttrack { animation: none; padding-left: 10px; } .live i { animation: none; } }
 .status { display: flex; align-items: center; gap: 0; background: var(--bg-2); border-top: 1px solid var(--line); font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; }
 .status .seg { padding: 0 10px; border-right: 1px solid var(--line); height: 100%; display: flex; align-items: center; gap: 6px; }

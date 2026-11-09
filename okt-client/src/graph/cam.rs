@@ -217,6 +217,144 @@ pub fn clamp(pose: &Pose, d_min: f64, d_max: f64) -> Pose {
     }
 }
 
+/// A flight to a walk's target lasts this long.
+pub const WARP_MS: f64 = 600.0;
+/// The van Wijk–Nuij path's trade between zooming out and panning (√2, as d3's `interpolateZoom`).
+const RHO: f64 = std::f64::consts::SQRT_2;
+/// A flight's highest point is aimed this far above its floor, so a frame drawn near the top
+/// still clears it.
+const RISE_MARGIN: f64 = 1.1;
+
+/// `ln cosh x`, without overflow.
+fn ln_cosh(x: f64) -> f64 {
+    let a = x.abs();
+    a + (-2.0 * a).exp().ln_1p() - std::f64::consts::LN_2
+}
+
+/// A flight from one pose to another: the camera rises and descends on the van Wijk–Nuij path,
+/// the optimal pan-and-zoom of a window whose width is the visible height `2·d·tan(FOV/2)`, so a
+/// long pan goes up high enough to see both ends. Its highest point is at least a floor (lifted
+/// there when the path alone stays lower), and no frame goes past a cap (the galaxy fit) unless
+/// an end is already beyond it. With the targets at one place it is a log-lerp of the distance
+/// with the same floor. Azimuth and elevation turn over the same eased parameter, so the turn
+/// happens high up.
+#[derive(Clone, Copy, Debug)]
+pub struct Warp {
+    from: Pose,
+    to: Pose,
+    /// the pan distance; 0 on the log-lerp
+    dist: f64,
+    r0: f64,
+    /// the path's length in its own parameter
+    len: f64,
+    /// where along the flight (0–1) the lift is anchored: the path's own top, kept off the ends
+    pub apex: f64,
+    /// the lift added to `ln d` at `apex`, falling to 0 at both ends
+    lift: f64,
+    /// `ln` of the highest distance a frame may reach
+    ln_cap: f64,
+}
+
+/// A flight from `from` to `to` that rises to at least `floor` (when the cap allows) and never
+/// past `cap`.
+pub fn warp(from: &Pose, to: &Pose, floor: f64, cap: f64) -> Warp {
+    let ty = (FOV_Y / 2.0).tan();
+    let (w0, w1) = (2.0 * from.d() * ty, 2.0 * to.d() * ty);
+    let q = sub(to.target, from.target);
+    let dist = dot(q, q).sqrt();
+    let ln_cap = cap.max(1e-9).ln().max(from.ln_d).max(to.ln_d);
+    let mut w = Warp {
+        from: *from,
+        to: *to,
+        dist: 0.0,
+        r0: 0.0,
+        len: 0.0,
+        apex: 0.5,
+        lift: 0.0,
+        ln_cap,
+    };
+    if dist > 1e-9 * (w0 + w1) {
+        let (rho2, rho4) = (RHO * RHO, RHO.powi(4));
+        let b0 = (w1 * w1 - w0 * w0 + rho4 * dist * dist) / (2.0 * w0 * rho2 * dist);
+        let b1 = (w1 * w1 - w0 * w0 - rho4 * dist * dist) / (2.0 * w1 * rho2 * dist);
+        // ln(√(b²+1) − b), stably
+        let (r0, r1) = (-b0.asinh(), -b1.asinh());
+        let len = (r1 - r0) / RHO;
+        if len.is_finite() && len > 0.0 {
+            w.dist = dist;
+            w.r0 = r0;
+            w.len = len;
+        }
+    }
+    // the path's own top: where cosh(ρs + r0) is least, or the higher end of a log-lerp
+    let top = if w.dist > 0.0 {
+        -w.r0 / RHO / w.len
+    } else if to.ln_d > from.ln_d {
+        1.0
+    } else {
+        0.0
+    };
+    w.apex = top.clamp(0.25, 0.75);
+    let aim = (floor.max(1e-9) * RISE_MARGIN).ln().min(ln_cap);
+    w.lift = (aim - w.base_ln_d(w.apex)).max(0.0);
+    w
+}
+
+impl Warp {
+    /// `ln d` on the path alone, `e` of the way along.
+    fn base_ln_d(&self, e: f64) -> f64 {
+        if self.dist > 0.0 {
+            let s = e * self.len;
+            self.from.ln_d + ln_cosh(self.r0) - ln_cosh(RHO * s + self.r0)
+        } else {
+            self.from.ln_d + (self.to.ln_d - self.from.ln_d) * e
+        }
+    }
+    /// How far the target has gone, 0–1, `e` of the way along.
+    fn pan(&self, e: f64) -> f64 {
+        if self.dist > 0.0 {
+            let ty = (FOV_Y / 2.0).tan();
+            let w0 = 2.0 * self.from.d() * ty;
+            let s = e * self.len;
+            w0 / (RHO * RHO * self.dist)
+                * (self.r0.cosh() * (RHO * s + self.r0).tanh() - self.r0.sinh())
+        } else {
+            e
+        }
+    }
+    /// The lift's share at `e`: 0 at both ends, 1 at `apex`.
+    fn bump(&self, e: f64) -> f64 {
+        let h = std::f64::consts::FRAC_PI_2;
+        if e <= self.apex {
+            (h * e / self.apex).sin()
+        } else {
+            (h * (1.0 - e) / (1.0 - self.apex)).sin()
+        }
+    }
+    /// The pose `e` (the eased parameter) of the way along; the ends are exact.
+    pub fn at(&self, e: f64) -> Pose {
+        if e <= 0.0 {
+            return self.from;
+        }
+        if e >= 1.0 {
+            return Pose {
+                theta: wrap_pi(self.to.theta),
+                ..self.to
+            };
+        }
+        let (a, b) = (&self.from, &self.to);
+        let k = self.pan(e);
+        // x + (y − x)·t keeps a target that does not move exactly where it is
+        let lerp = |x: f64, y: f64, t: f64| x + (y - x) * t;
+        Pose {
+            target: [0, 1, 2].map(|i| lerp(a.target[i], b.target[i], k)),
+            theta: wrap_pi(a.theta + wrap_pi(b.theta - a.theta) * e),
+            psi: lerp(a.psi, b.psi, e),
+            ln_d: (self.base_ln_d(e) + self.lift * self.bump(e)).min(self.ln_cap),
+        }
+    }
+}
+
 /// The change in `ln d` one wheel event asks for. `mode` is the event's `deltaMode` (0 pixels,
 /// 1 lines of 16 px, 2 pages of `page_h` px); a ctrl wheel is a trackpad pinch, which moves
 /// faster. Clamped to ±[`WHEEL_MAX`].
@@ -828,6 +966,120 @@ mod tests {
             let p = ease_pose(&a, &b, e);
             assert!((p.ln_d - (a.ln_d + (b.ln_d - a.ln_d) * e)).abs() < 1e-12);
         }
+    }
+
+    /// A flight's poses at many points along it, its apex included.
+    fn flight(w: &Warp) -> Vec<Pose> {
+        let mut es: Vec<f64> = (0..=2000).map(|i| i as f64 / 2000.0).collect();
+        es.push(w.apex);
+        es.iter().map(|&e| w.at(e)).collect()
+    }
+
+    #[test]
+    fn warp_endpoints_and_rise() {
+        let mut rng = Rng(0x5eed_0f_f11e5);
+        let d_g = 2000.0;
+        for case in 0..400 {
+            let pose = |rng: &mut Rng, d: f64| Pose {
+                target: [
+                    rng.range(-600.0, 600.0),
+                    rng.range(-600.0, 600.0),
+                    rng.range(-600.0, 600.0),
+                ],
+                theta: rng.range(-PI, PI),
+                psi: rng.range(-1.2, 1.2),
+                ln_d: d.ln(),
+            };
+            let (d0, d1) = (rng.range(20.0, 400.0), rng.range(20.0, 400.0));
+            let a = pose(&mut rng, d0);
+            let mut b = pose(&mut rng, d1);
+            // every fourth case: one place, a different distance and angles (D = 0)
+            let same = case % 4 == 0;
+            if same {
+                b.target = a.target;
+            }
+            let d_sys = rng.range(100.0, 900.0);
+            let floor = (2.0 * d0.max(d1)).max(d_sys);
+            let w = warp(&a, &b, floor, d_g);
+            // the ends are exact
+            assert_eq!(w.at(0.0), a, "case {case}: start");
+            let end = w.at(1.0);
+            assert_eq!(end.target, b.target, "case {case}: end target");
+            assert!(end.psi == b.psi && end.ln_d == b.ln_d, "case {case}: end");
+            assert_eq!(end.theta, wrap_pi(b.theta), "case {case}: end azimuth");
+            // the rise: at least the floor (as far as the galaxy fit allows), never past it
+            let ps = flight(&w);
+            assert!(
+                ps.iter()
+                    .all(|p| p.ln_d.is_finite() && p.target.iter().all(|c| c.is_finite())),
+                "case {case}: finite"
+            );
+            let peak = ps.iter().map(|p| p.d()).fold(0.0, f64::max);
+            assert!(
+                peak >= floor.min(d_g) * (1.0 - 1e-9),
+                "case {case}: peak {peak} below floor {floor}"
+            );
+            assert!(
+                peak <= d_g * (1.0 + 1e-9),
+                "case {case}: peak {peak} past {d_g}"
+            );
+            if same {
+                assert!(
+                    ps.iter().all(|p| p.target == a.target),
+                    "case {case}: D = 0 pans"
+                );
+            }
+        }
+        // D = 0 with the floor below both ends: exactly the log-lerp
+        let a = Pose {
+            target: [3.0, -4.0, 5.0],
+            theta: 0.2,
+            psi: 0.1,
+            ln_d: 60f64.ln(),
+        };
+        let b = Pose {
+            theta: 1.0,
+            ln_d: 90f64.ln(),
+            ..a
+        };
+        let w = warp(&a, &b, 10.0, d_g);
+        for i in 0..=100 {
+            let e = i as f64 / 100.0;
+            let want = a.ln_d + (b.ln_d - a.ln_d) * e;
+            assert!((w.at(e).ln_d - want).abs() < 1e-12, "log-lerp at {e}");
+        }
+        // with a floor it rises to it in the middle, from both ends
+        let w = warp(&a, &b, 500.0, d_g);
+        let peak = flight(&w).iter().map(|p| p.d()).fold(0.0, f64::max);
+        assert!((500.0..=d_g).contains(&peak), "log-lerp floor: {peak}");
+        // the path alone: equal widths over a long pan rise to about the pan distance (ρ = √2)
+        let ty = (FOV_Y / 2.0).tan();
+        let far = Pose {
+            target: [a.target[0] + 5000.0, a.target[1], a.target[2]],
+            ..a
+        };
+        let w = warp(&a, &far, 1.0, 1e9);
+        let top = flight(&w)
+            .iter()
+            .map(|p| 2.0 * p.d() * ty)
+            .fold(0.0, f64::max);
+        assert!(
+            (top / 5000.0 - 1.0).abs() < 0.02,
+            "van Wijk–Nuij top width {top}"
+        );
+        // and the cap holds it at the galaxy fit
+        let w = warp(&a, &far, 1.0, 1000.0);
+        let peak = flight(&w).iter().map(|p| p.d()).fold(0.0, f64::max);
+        assert!(peak <= 1000.0 * (1.0 + 1e-12), "capped peak {peak}");
+        // the target pans monotonically from end to end
+        let ks: Vec<f64> = flight(&warp(&a, &far, 1.0, 1e9))[..=2000]
+            .iter()
+            .map(|p| p.target[0])
+            .collect();
+        assert!(
+            ks.windows(2).all(|x| x[1] >= x[0] - 1e-9),
+            "pan is monotone"
+        );
     }
 
     #[test]

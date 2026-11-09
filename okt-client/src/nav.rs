@@ -1,4 +1,7 @@
 //! Selection and navigation: `select()`, views and tabs, the URL hash (back/forward), crumbs.
+//!
+//! Each history entry also records where the graph's camera was going (`graph::pose_state`), so
+//! back and forward ease the camera to the view the entry had. The hash is unchanged by it.
 
 use crate::api::spawn;
 use crate::dom;
@@ -12,6 +15,8 @@ pub struct SelOpts {
     pub tab: Option<&'static str>,
     pub mode: Option<&'static str>,
     pub keep_mode: bool,
+    /// the graph flies to the new selection (Enter or space on a walk's target)
+    pub warp: bool,
 }
 
 /// `select(id, opts)`
@@ -23,6 +28,8 @@ pub fn select(id: Option<&str>, opts: SelOpts) {
             return;
         }
     }
+    // the camera of the entry being left, before the new selection moves it
+    let before = graph::pose_state();
     let moved = id.map(String::from) != state::sel();
     if moved {
         graph::walk_reset(); // the walk belongs to the old selection
@@ -50,9 +57,13 @@ pub fn select(id: Option<&str>, opts: SelOpts) {
             st.tab = t.into();
         }
     }
-    // the graph's camera follows the selection from any source: eased while the graph shows,
-    // cut while it is hidden
-    graph::update();
+    // the graph's camera follows the selection from any source: eased (or flown) while the graph
+    // shows, cut while it is hidden
+    graph::update_with(if opts.warp {
+        graph::Arrive::Warp
+    } else {
+        graph::Arrive::Solve
+    });
     let view = s().view;
     if view == "files" && opts.from != "tree" {
         views::tree::render();
@@ -66,7 +77,7 @@ pub fn select(id: Option<&str>, opts: SelOpts) {
     render_crumbs();
     insp::render();
     if opts.from != "pop" {
-        nav(true);
+        nav_from(true, Some(before));
     }
 }
 
@@ -153,6 +164,13 @@ pub fn state_hash() -> String {
 
 /// `nav(push)`
 pub fn nav(push: bool) {
+    nav_from(push, None);
+}
+
+/// `nav(push)`, with each entry recording the graph's camera: a push first records `before` (the
+/// camera as it was, taken before a selection moved it; now, when `None`) on the entry being
+/// left, then records where the camera is going on the new one.
+fn nav_from(push: bool, before: Option<wasm_bindgen::JsValue>) {
     if s().restoring {
         return;
     }
@@ -162,9 +180,11 @@ pub fn nav(push: bool) {
     }
     let hist = dom::win().history().unwrap();
     if push {
-        let _ = hist.push_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&h));
+        let before = before.unwrap_or_else(graph::pose_state);
+        let _ = hist.replace_state(&before, "");
+        let _ = hist.push_state_with_url(&graph::pose_state(), "", Some(&h));
     } else {
-        let _ = hist.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&h));
+        let _ = hist.replace_state_with_url(&graph::pose_state(), "", Some(&h));
     }
 }
 
@@ -178,6 +198,7 @@ pub async fn apply_hash() {
 async fn apply_hash_inner() {
     let Some(idx) = state::idx() else { return };
     let hash = dom::location_hash();
+    let hist = dom::win().history().unwrap();
     let p = web_sys::UrlSearchParams::new_with_str(hash.get(1..).unwrap_or("")).unwrap();
     let v = p
         .get("v")
@@ -207,6 +228,12 @@ async fn apply_hash_inner() {
             }
         }
     }
+    // the hash and the camera its entry recorded, read together after the last await: a second
+    // back or forward meanwhile has its own apply, and this one gives way to it
+    if dom::location_hash() != hash {
+        return;
+    }
+    let camera = hist.state().unwrap_or(wasm_bindgen::JsValue::NULL);
     if s().view != v {
         set_view(&v, true);
     }
@@ -221,7 +248,10 @@ async fn apply_hash_inner() {
         }
         st.commit = c.filter(|x| !x.is_empty());
     }
-    graph::update();
+    if state::sel() != prev {
+        graph::walk_reset(); // the walk belonged to the entry left
+    }
+    graph::update_with(graph::Arrive::At(camera));
     let view = s().view;
     if view == "files" {
         views::tree::render();

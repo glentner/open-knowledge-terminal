@@ -3,10 +3,10 @@ slug: graph-galaxy
 title: The graph as a navigable 3D space (galaxy, system, focus)
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feat/graph-galaxy
 base: main
-current_phase: P7
+current_phase: done
 last_updated: '2026-11-08'
 phases:
 - id: P1
@@ -83,7 +83,7 @@ phases:
   verify: sh spec/graph-galaxy/verify/gate.sh P6
 - id: P7
   name: Warp flight, history, frame-time gate and ledger
-  status: pending
+  status: done
   satisfies:
   - R6
   - R11
@@ -93,6 +93,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: sh spec/graph-galaxy/verify/gate.sh P7
 review:
   last_reviewed_commit: ''
@@ -541,10 +542,10 @@ is placed first.
     root), or every drawn node under show all. Galaxy scale has none, except under show all with a
     selection (still capped at 24). `data-label-cands` counts the candidates in front of the
     camera.
-  - *Foreman ruling (2026-11-08), follow-up commit:* R1 is unconditional. With nothing selected,
-    the galaxy labels region names only, show all or not: R8's show all is about drawing, not
-    labels. The first P5 commit let show all name cards at the galaxy fit with nothing selected;
-    the follow-up stops it, and `verify/checks.txt` gains the P5 row "show all at the galaxy
+  - *Foreman ruling (2026-11-08), a second P5 commit:* R1 is unconditional. With nothing
+    selected, the galaxy labels region names only, show all or not: R8's show all is about
+    drawing, not labels. The first P5 commit let show all name cards at the galaxy fit with
+    nothing selected; the second stops it, and `verify/checks.txt` gains the P5 row "show all at the galaxy
     labels region names only" (nothing selected, show all on, at the galaxy fit: data-scale
     galaxy, data-label-cands 0, every data-labels entry a region).
   - **Where a label sits:** at its point when the point is on the pane. A portal whose card is
@@ -658,9 +659,9 @@ carry the target's path.
 - The headed orbit and warp hold p95 ≤ 16.7 ms.
 - The cycle's records are consistent.
 
-- [ ] `keys.rs` walk branch: Enter/space call `nav::select(Some(t), SelOpts { warp: true, .. })`.
+- [x] `keys.rs` walk branch: Enter/space call `nav::select(Some(t), SelOpts { warp: true, .. })`.
       With no walk they keep today's meaning (folder toggle, content tab).
-- [ ] `nav.rs`:
+- [x] `nav.rs`:
   - add `SelOpts.warp`;
   - before `nav(true)` pushes, `replace_state` the current entry with `{pose}`, the destination pose
     of any move in flight;
@@ -668,22 +669,62 @@ carry the target's path.
     `graph::cam_to(pose, Ease)` (fallback: the R3 solve) and `graph::walk_reset()` when the
     selection changed;
   - the hash format and its dedupe are unchanged.
-- [ ] `graph.rs`: `focus_node_with(id, Move::Warp)` calls `cam_to(Warp)`: van Wijk–Nuij, 600 ms, with
+- [x] `graph.rs`: `focus_node_with(id, Move::Warp)` calls `cam_to(Warp)`: van Wijk–Nuij, 600 ms, with
       the minimum rise of PLAN § 2.7 and a cap at the galaxy fit. The hook `data-peak` records the
       flight's peak.
-- [ ] `graph/cam.rs`: test `warp_endpoints_and_rise`: endpoints exact; peak ≥ max(2·max(d₀, d₁),
+- [x] `graph/cam.rs`: test `warp_endpoints_and_rise`: endpoints exact; peak ≥ max(2·max(d₀, d₁),
       d_system) and ≤ d_G; D = 0 falls back to a log-lerp with the same floor.
-- [ ] Docs: `README.md` § Keys and the `?` list say Enter or space flies there, `[` flies back and
+- [x] Docs: `README.md` § Keys and the `?` list say Enter or space flies there, `[` flies back and
       `]` goes forward.
-- [ ] `tests/perf/profile.mjs --graph`: add `warp`, six round trips of `j`, space (alternating with
+- [x] `tests/perf/profile.mjs --graph`: add `warp`, six round trips of `j`, space (alternating with
       Enter), wait, `[`, wait. Frames are recorded only while `data-anim="1"`, and the scenario needs
       at least 900 of them.
-- [ ] `tests/ui/keys.mjs`: the P7 rows.
-- [ ] Seed `issues/perf-profile-points.md` (`unshaped`) and its `ROADMAP.md` entry. The legacy
+- [x] `tests/ui/keys.mjs`: the P7 rows.
+- [x] Seed `issues/perf-profile-points.md` (`unshaped`) and its `ROADMAP.md` entry. The legacy
       `profile.mjs` mode throws on the empty `points.json` and defaults to 6580. This is pre-existing
       and not fixed in this cycle.
-- [ ] The deferral ledger: walk every earlier phase body here and `PLAN.md`. Each deferred item names
+- [x] The deferral ledger: walk every earlier phase body here and `PLAN.md`. Each deferred item names
       an `issues/` seed with a `ROADMAP.md` entry (`verify/ledger.sh`, run by the gate).
+- *Amended in build (2026-11-08):*
+  - **How a selection arrives:** `graph::update_with(Arrive)` replaces the bare `update()` call in
+    `nav::select` and `apply_hash` (`update()` is `update_with(Arrive::Solve)`). `Arrive::Warp`
+    (from `SelOpts.warp`) sends a moved selection through `focus_node_with(id, Move::Warp)`;
+    `Arrive::At(state)` (from `apply_hash`) eases to the camera the history entry recorded, after
+    the selection's own move, and does nothing when the entry recorded none (the R3 solve stands).
+    `focus_node_with` takes any target: a card flies onto its solve, a folder onto its region's
+    fit, the root onto the galaxy fit. `Move` is public and gains `Warp`.
+  - **The path:** `cam::warp(from, to, floor, cap)` returns a `Warp` whose `at(e)` takes the eased
+    parameter. Where the van Wijk–Nuij path alone stays under the floor, `ln d` is lifted by a
+    sine bump anchored at the path's own top (kept between 0.25 and 0.75 of the way) and zero at
+    both ends; the lift aims a tenth above the floor, so a frame drawn near the top still clears
+    it. The floor is `max(2·max(d₀, d₁), d_sys)`, `d_sys` the system distance the bands use (the
+    active region's fit, else a typical region's), and every frame is capped at the galaxy fit
+    unless an end is already beyond it. `data-peak` is the largest distance a frame of the last
+    flight drew (`gl::publish`; a flight under reduced motion records its end).
+  - **History:** each entry's `history.state` is `{pose: [x, y, z, θ, ψ, ln d], scale, region}`
+    (`graph::pose_state()`, the destination pose). `select` takes the camera before its move
+    starts, and `nav_from` writes it on the entry being left before the push, then writes the new
+    destination on the new entry; `nav(false)` replaces with the current one. `apply_hash` reads
+    the hash and `history.state` after its last await, gives way when the hash changed meanwhile,
+    and restores the recorded scale with the pose (a `[` is a solved move, so the scale is the
+    entry's). A view switch's entry records the camera too.
+  - **`app.css`:** `data-peak` changes `gl.rs`, and the paint rule pairs `app.css` with it: the
+    reduced-motion rule's comment records that the camera reads the same query and cuts every
+    move. No paint changes in this phase.
+  - **`profile.mjs --graph` warp:** it walks from the most connected card with show all off, and
+    runs at least six round trips, more while fewer than 900 animated frames are recorded (at most
+    24), since six round trips give about 900 frames at 144 Hz and fewer below. A frame interval
+    counts when both of its frames have `data-anim="1"`. The JSON line adds `trips`.
+  - **The P5 ruling's note** named its second commit in words the ledger's phrase list flags,
+    though no work was put off; it now says "a second P5 commit" (this cycle's own text,
+    corrected in place).
+  - **`keys.mjs` flights** run in a fresh tab, since Chromium caps `history.length` at 50 and the
+    suite's tab reaches it, and step `j` (up to 12 times) to a card the camera did not move far out
+    to take in: a re-fit near the galaxy fit puts twice its distance past the cap. The first gate
+    run was red on both (the recorded attempt); the checker was fixed and the gate re-run whole.
+  - **`issues/perf-profile-points.md`** records what holds at `HEAD`: `points.json` has six points,
+    so the throw research 06 saw needs the file emptied or missing; the live defects are the 6580
+    defaults (the legacy profile and `keys.mjs`) and scenarios written for the 2D graph.
 - **Verify:** `sh spec/graph-galaxy/verify/gate.sh P7`.
 - **Touches:** `okt-client/src/keys.rs`, `okt-client/src/nav.rs`, `okt-client/src/graph.rs`,
   `okt-client/src/graph/cam.rs`, `okt-client/src/chrome.rs`, `README.md`, `tests/ui/keys.mjs`,

@@ -24,6 +24,10 @@
 //          FIND matches across regions, moving no card; j/k step clockwise in screen order around
 //          the selection, a target in another region a portal labelled with its path, its
 //          inspector chip marked and kept marked through a re-render
+//   WARP   Enter or space during a walk flies to the target (one ~600 ms move rising to at least
+//          twice both end distances) and pushes a history entry; [ eases back to the camera the
+//          entry left had, ] forward again; reduced motion cuts both; interleaved moves never
+//          trip a borrow
 //   LAYOUT the 3D layout: stable across a shuffled reload, and adding cards (written into the
 //          env.sh clone, $OKT_KB) moves nothing outside their folders
 //   node tests/ui/keys.mjs [okt-url]
@@ -991,6 +995,202 @@ const sameAt = (a, b) => { const ks = Object.keys(a || {}); return ks.length > 0
       view === 'list' && now === 'graph' && f.scale === 'focus' && f.n === pick.ms.length && pts.every(Boolean) && inside && extent >= 0.6 && extent <= 0.8,
       { word: pick.w, matches: pick.ms.length, regions: pick.regions, from: view, to: now, scale: f.scale, focusN: f.n, inside, extent: +extent.toFixed(3) });
   }
+}
+
+// ---- WARP -----------------------------------------------------------------------------------
+// Enter or space during a walk flies to the target: one move of about 600 ms that rises to at
+// least twice both of its end distances, and a history entry. [ eases back to the camera the
+// entry left had, ] forward to the flight's end; under reduced motion each is one write of the
+// pose. Interleaved moves never trip a borrow (a page error or console "already borrowed").
+// a flight in the timeline: from its first data-anim "1" to the "0" after it, and its data-dist
+const flightOf = tl => {
+  const on = tl.findIndex(e => e[1] === 'data-anim' && e[2] === '1');
+  const off = on < 0 ? -1 : tl.findIndex((e, k) => k > on && e[1] === 'data-anim' && e[2] === '0');
+  const dists = tl.slice(Math.max(on, 0), off < 0 ? tl.length : off + 1).filter(e => e[1] === 'data-dist').map(e => +e[2]);
+  return { ms: on >= 0 && off > on ? +(tl[off][0] - tl[on][0]).toFixed(1) : 0, peak: Math.max(0, ...dists), writes: dists.length };
+};
+const near = (a, b) => Math.abs(dang(a.theta, b.theta)) <= 0.5 && Math.abs(a.psi - b.psi) <= 0.5 && Math.abs(a.dist - b.dist) <= 0.5;
+const poseOf = c => ({ theta: c.theta, psi: c.psi, dist: c.dist });
+// j (again, up to 12 times, until the walk is on a card the camera did not move out far to take
+// in: a far re-fit puts twice its distance past the galaxy fit, where the flight is capped), then
+// the key: what the walk was on, the history length and the camera before, and the flight
+const fly = async (k, pg = page) => {
+  await pg.evaluate(() => document.activeElement?.blur());
+  for (let n = 0; n < 12; n++) {
+    const i0 = await gattrOf(pg, 'data-walk-i');
+    await pg.keyboard.press('j');
+    await pg.waitForFunction(i => document.getElementById('graph').getAttribute('data-walk-i') !== i, i0, { timeout: 3000 }).catch(() => {});
+    // j moves the camera only to re-fit a target near the edge: let any such move finish
+    await twoFrames(pg);
+    await pg.waitForFunction(() => document.getElementById('graph').getAttribute('data-anim') === '0', null, { timeout: 5000 }).catch(() => {});
+    const c = await cam(pg);
+    if (kind[await gattrOf(pg, 'data-walk')] === 'file' && 2.5 * c.dist <= c.galaxy) break;
+  }
+  const walk = await gattrOf(pg, 'data-walk');
+  const c0 = await cam(pg);
+  const h0 = await pg.evaluate(() => history.length);
+  const i = await tlLen(pg);
+  await waits(() => pg.keyboard.press(k), pg);
+  await pg.waitForTimeout(100);
+  const c1 = await cam(pg);
+  const h1 = await pg.evaluate(() => history.length);
+  return { walk, c0, c1, h0, h1, tl: await tlFrom(i, pg), focus: await gattrOf(pg, 'data-focus') };
+};
+const flew = f => {
+  const m = flightOf(f.tl);
+  return { ok: !!f.walk && f.c1.sel === f.walk && f.focus === f.walk && f.h1 === f.h0 + 1 && m.ms >= 500 && m.ms <= 800 && m.peak >= 2 * f.c0.dist && m.peak >= 2 * f.c1.dist,
+    detail: { walk: f.walk, sel: f.c1.sel, history: [f.h0, f.h1], ms: m.ms, peak: m.peak, from: f.c0.dist, to: f.c1.dist } };
+};
+{
+  // a fresh tab: Chromium caps history.length at 50, which this one has reached
+  const wp = await ctx.newPage();
+  wp.on('pageerror', e => errors.push(e.message));
+  wp.on('console', m => { const t = m.text(); if (t.includes('panicked at') || t.includes('already borrowed')) errors.push('console: ' + t); });
+  const page = wp;
+  const go = async hash => { await page.evaluate(h => { location.hash = h; }, hash); await page.waitForTimeout(700); };
+  const gattr = name => gattrOf(page, name);
+  try {
+    await page.goto(OKT + '#v=graph', { waitUntil: 'load' });
+    await page.waitForFunction(() => document.getElementById('graph')?.getAttribute('data-dist'), null, { timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(800);
+    await waits(() => go('#v=graph&s=' + encodeURIComponent(walker)), page);
+    await page.evaluate(() => document.activeElement?.blur());
+    // orbit about 40 degrees by a drag (dθ = -dx / min(W, H) · 180°)
+    const box = await page.locator('#graph').boundingBox();
+    const cx = box.x + box.width / 2, cy = box.y + box.height / 2, dx = 40 / 180 * Math.min(box.width, box.height);
+    const o0 = await cam(page);
+    await page.mouse.move(cx - dx / 2, cy + 9);
+    await page.mouse.down();
+    await page.mouse.move(cx + dx / 2, cy + 9, { steps: 10 });
+    await page.mouse.up();
+    await twoFrames(page);
+    const o1 = await cam(page);
+    const space = await fly(' ', page);
+    const s = flew(space);
+    check('space flies to the walk target', s.ok, { ...s.detail, orbit: +dang(o0.theta, o1.theta).toFixed(1) });
+    // [ back: the hash, the focus and the camera from before the flight, by an ease
+    const i = await tlLen(page);
+    await waits(() => page.keyboard.press('['), page);
+    await page.waitForTimeout(100);
+    const b = await cam(page);
+    const bt = await tlFrom(i, page);
+    const ease = ['data-theta', 'data-psi', 'data-dist'].map(a => eased(bt, a));
+    const bf = await gattr('data-focus');
+    check('[ eases back to the previous focus',
+      b.sel === walker && bf === walker && near(b, space.c0) && ease.some(e => e.mid >= 3 && e.span >= 100) && Math.abs(dang(o0.theta, o1.theta)) >= 20,
+      { sel: b.sel, focus: bf, before: poseOf(space.c0), back: poseOf(b), ease, orbit: +dang(o0.theta, o1.theta).toFixed(1) });
+    await waits(() => page.keyboard.press(']'), page);
+    await page.waitForTimeout(100);
+    const f = await cam(page);
+    check('] goes forward again', f.sel === space.walk && near(f, space.c1), { sel: f.sel, target: space.walk, end: poseOf(space.c1), now: poseOf(f) });
+    const enter = await fly('Enter', page);
+    const e = flew(enter);
+    check('Enter flies to the walk target', e.ok, e.detail);
+  } finally {
+    await wp.close();
+  }
+}
+{
+  // reduced motion: the flight and [ each write the pose once, and nothing animates
+  const rctx = await browser.newContext({ viewport: { width: 1600, height: 1000 }, reducedMotion: 'reduce' });
+  try {
+    await rctx.addInitScript(hooks);
+    const rp = await rctx.newPage();
+    rp.on('pageerror', e => errors.push(e.message));
+    await rp.goto(OKT + '#v=graph&s=' + encodeURIComponent(walker), { waitUntil: 'load' });
+    await rp.waitForFunction(() => document.getElementById('graph')?.getAttribute('data-dist'), null, { timeout: 30000 }).catch(() => {});
+    await rp.waitForTimeout(800);
+    // one write of each pose hook at most, at least one, all in one frame, each its end value
+    const once = (tl, end) => {
+      const ws = tl.filter(e => ['data-theta', 'data-psi', 'data-dist'].includes(e[1]));
+      const per = a => ws.filter(e => e[1] === a).length;
+      // one frame: every write within 4 ms of the first (frames are 7 ms or more apart)
+      const span = ws.length ? Math.max(...ws.map(e => e[0])) - Math.min(...ws.map(e => e[0])) : 0;
+      return { writes: ws.length, span: +span.toFixed(2),
+        ok: ws.length >= 1 && per('data-theta') <= 1 && per('data-psi') <= 1 && per('data-dist') <= 1 && span <= 4
+          && ws.every(e => +e[2] === end[{ 'data-theta': 'theta', 'data-psi': 'psi', 'data-dist': 'dist' }[e[1]]]) };
+    };
+    const f = await fly(' ', rp);
+    const flight = once(f.tl, f.c1);
+    const i = await tlLen(rp);
+    await waits(() => rp.keyboard.press('['), rp);
+    await rp.waitForTimeout(200);
+    const b = await cam(rp);
+    const back = once(await tlFrom(i, rp), b);
+    const anim1 = (await rp.evaluate(() => window.__tl)).filter(e => e[1] === 'data-anim' && e[2] === '1').length;
+    check('reduced motion cuts the flight',
+      flight.ok && back.ok && anim1 === 0 && f.c1.sel === f.walk && !!f.walk && b.sel === walker,
+      { flight, back, anim1, walk: f.walk, sel: [f.c1.sel, b.sel] });
+  } finally {
+    await rctx.close();
+  }
+}
+{
+  // interleaved moves: each starts while another is in flight
+  const e0 = errors.length;
+  const done = [];
+  const flightStart = async () => {
+    await page.evaluate(() => document.activeElement?.blur());
+    await key('j', 150);
+    await page.keyboard.press(' ');
+    await page.waitForTimeout(200);
+  };
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(walker)));
+  await flightStart();
+  await page.keyboard.press('[');
+  await page.waitForTimeout(900);
+  done.push('[ mid-flight');
+  await page.evaluate(h => { location.hash = '#v=graph&s=' + encodeURIComponent(h); }, hub);
+  await page.waitForTimeout(60);
+  await page.keyboard.press('j');
+  await page.keyboard.press('j');
+  await page.waitForTimeout(700);
+  done.push('j during a selection ease');
+  await page.keyboard.press('Escape');
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(walker)));
+  await flightStart();
+  await page.keyboard.press('z');
+  await page.waitForTimeout(700);
+  done.push('z during a flight');
+  const box = await page.locator('#graph').boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  for (let k = 0; k < 24; k++) { await page.mouse.wheel(0, 240); await page.waitForTimeout(16); }
+  for (let k = 0; k < 24; k++) { await page.mouse.wheel(0, -240); await page.waitForTimeout(16); }
+  await page.waitForTimeout(600);
+  done.push('a wheel run across the scale bands');
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(walker)));
+  await flightStart();
+  await page.locator('#setbtn').click();
+  await page.waitForTimeout(100);
+  const swatches = page.locator('#settings [data-accent]');
+  if (await swatches.count() > 1) { await swatches.nth(1).click(); await page.waitForTimeout(150); await page.locator('#settings [data-accent]').nth(0).click(); }
+  done.push('an accent change mid-flight');
+  await page.waitForTimeout(150);
+  for (let k = 0; k < 2; k++) { await page.locator('#settings [data-showall]').click(); await page.waitForTimeout(250); }
+  done.push('the SHOW ALL settings row, twice');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => document.activeElement?.blur());
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(walker)));
+  await flightStart();
+  const lost = await page.evaluate(async () => {
+    const gl = document.getElementById('graph').getContext('webgl2');
+    const ext = gl && gl.getExtension('WEBGL_lose_context');
+    if (!ext) return 'no WEBGL_lose_context';
+    ext.loseContext();
+    await new Promise(r => setTimeout(r, 300));
+    ext.restoreContext();
+    await new Promise(r => setTimeout(r, 500));
+    return gl.isContextLost() ? 'still lost' : 'ok';
+  });
+  done.push('context loss mid-flight');
+  // and the camera still answers
+  const m0 = await gattr('data-move');
+  await waits(() => page.keyboard.press('ArrowRight'));
+  const m1 = await gattr('data-move');
+  const fresh = errors.slice(e0);
+  check('no borrow panics under interleaved moves',
+    fresh.length === 0 && lost === 'ok' && m1 !== m0 && done.length === 7,
+    { done, lost, answers: m1 !== m0, errors: fresh.slice(0, 3) });
 }
 
 // ---- LAYOUT ---------------------------------------------------------------------------------

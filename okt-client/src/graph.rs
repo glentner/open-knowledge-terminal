@@ -28,7 +28,10 @@
 //! selection is solved, or for a results list's matches where they are, across regions. `j`/`k`
 //! walk the selection's connections clockwise on screen, from 12 o'clock around the selection, in
 //! an order taken when the walk starts and kept while the camera holds still; a connection in
-//! another region is a portal, its edge out to that region's glyph on the rim.
+//! another region is a portal, its edge out to that region's glyph on the rim. Enter or space
+//! flies to the walk's target: the camera rises toward galaxy scale and comes down on it
+//! (`cam::warp`). Each history entry records where the camera was going (`pose_state`), and back
+//! and forward ease the camera to it.
 //!
 //! Frames are drawn on demand. Input handlers never draw: every camera move goes through
 //! `cam_to`, which starts an ease (or cuts, under reduced motion) and schedules a frame. The frame
@@ -371,10 +374,13 @@ struct CamAnim {
     rim1: f64,
     /// a move across the system/galaxy band: a zoom adjusts its distance instead of cancelling it
     cross: bool,
+    /// a flight: the path the pose follows instead of the plain ease
+    warp: Option<cam::Warp>,
 }
 
+/// How the camera gets to a pose.
 #[derive(Clone, Copy, PartialEq)]
-enum Move {
+pub enum Move {
     /// straight to the end pose
     Cut,
     /// eased over this many milliseconds (a cut under reduced motion)
@@ -382,6 +388,9 @@ enum Move {
     /// eased like `Ease`, across the system/galaxy band (the target travels between the origin
     /// and a region): a zoom during it moves both of its ends rather than stranding the target
     Cross(f64),
+    /// a flight (`cam::warp`, over `cam::WARP_MS`): up toward galaxy scale and down onto the end
+    /// pose (a cut under reduced motion)
+    Warp,
 }
 
 /// How far toward the rim the other regions' glyphs sit at a scale.
@@ -523,6 +532,8 @@ pub struct G {
     fit: Fit,
     /// camera moves started, for `data-move`
     moves: u64,
+    /// the highest camera distance a frame of the last flight drew, for `data-peak`
+    peak: f64,
     picks: Vec<Pick>,
     hover: Option<usize>,
     /// the node the keyboard walk is on (see `walk`), and where it is in the walk (1-based, of n)
@@ -587,7 +598,12 @@ impl G {
     /// The bands between the scales: around the active region, or a typical region (the
     /// geometric mean of their fits) when there is none.
     fn bands(&self) -> cam::Bands {
-        let d_s = match self.region {
+        cam::bands(self.d_focus(), self.d_sys(), self.d_galaxy())
+    }
+    /// System scale's distance: the active region's fit, or a typical region's (the geometric
+    /// mean of their fits) when there is none.
+    fn d_sys(&self) -> f64 {
+        match self.region {
             Some(r) => self.d_system(r),
             None => {
                 let ls: Vec<f64> = (0..self.space.regions.len())
@@ -600,8 +616,7 @@ impl G {
                     (ls.iter().sum::<f64>() / ls.len() as f64).exp()
                 }
             }
-        };
-        cam::bands(self.d_focus(), d_s, self.d_galaxy())
+        }
     }
     /// How far in a zoom may cross: focus when a card is selected in the active region,
     /// otherwise system.
@@ -766,7 +781,7 @@ thread_local! {
         show_all: false, scale: Scale::Galaxy, region: None, rim: 0.0, sel_id: None,
         inst_dirty: false, sel: None,
         pose: Pose { target: [0.0; 3], theta: THETA0, psi: PSI0, ln_d: 8.0 },
-        anim: None, autofit: true, fit: Fit::Galaxy, moves: 0, picks: vec![], hover: None,
+        anim: None, autofit: true, fit: Fit::Galaxy, moves: 0, peak: 0.0, picks: vec![], hover: None,
         cursor: None, walk_at: None, matches: None, flash: vec![], w: 0.0, h: 0.0, dpr: 1.0, host_rect: (0.0, 0.0, 0.0, 0.0),
         chrome: (0.0, 0.0, 0.0), chrome_rects: vec![], hint_rect: None, texts: Rc::new(vec![]),
         lab: LabelSet::default(),
@@ -1284,9 +1299,13 @@ fn reduced_motion() -> bool {
 }
 
 /// Every camera move goes through here. A cut (`Move::Cut`; any move under reduced motion, or
-/// while the graph is hidden) puts the camera at `to` at once; an ease starts from the pose the
-/// last frame showed, so nothing snaps. `data-move` is bumped before this returns, so a test can
-/// wait for a move to start before it waits for `data-anim="0"`.
+/// while the graph is hidden) puts the camera at `to` at once; an ease or a flight starts from
+/// the pose the last frame showed, so nothing snaps. `data-move` is bumped before this returns,
+/// so a test can wait for a move to start before it waits for `data-anim="0"`.
+///
+/// A flight rises to at least twice the farther of its two distances, and at least to system
+/// scale, so even a hop inside one region visibly climbs toward the galaxy; no frame of it goes
+/// past the galaxy fit.
 fn cam_to(to: Pose, mv: Move) {
     let reduced = reduced_motion();
     let n = {
@@ -1294,24 +1313,37 @@ fn cam_to(to: Pose, mv: Move) {
         let to = cam::clamp(&to, gs.d_min(), 1.5 * gs.d_galaxy());
         gs.moves += 1;
         let rim1 = rim_of(gs.scale);
-        match mv {
-            Move::Ease(ms) | Move::Cross(ms) if !reduced && gs.w > 0.0 => {
-                let (from, rim0) = (gs.pose, gs.rim);
-                gs.anim = Some(CamAnim {
-                    from,
-                    to,
-                    t0: dom::perf_now(),
-                    ms,
-                    rim0,
-                    rim1,
-                    cross: matches!(mv, Move::Cross(_)),
-                });
+        let ms = match mv {
+            Move::Ease(ms) | Move::Cross(ms) => ms,
+            Move::Warp => cam::WARP_MS,
+            Move::Cut => 0.0,
+        };
+        if ms > 0.0 && !reduced && gs.w > 0.0 {
+            let (from, rim0) = (gs.pose, gs.rim);
+            let warp = (mv == Move::Warp).then(|| {
+                let floor = (2.0 * from.d().max(to.d())).max(gs.d_sys());
+                cam::warp(&from, &to, floor, gs.d_galaxy())
+            });
+            if warp.is_some() {
+                gs.peak = from.d();
             }
-            _ => {
-                gs.pose = to;
-                gs.anim = None;
-                gs.rim = rim1;
+            gs.anim = Some(CamAnim {
+                from,
+                to,
+                t0: dom::perf_now(),
+                ms,
+                rim0,
+                rim1,
+                cross: matches!(mv, Move::Cross(_)),
+                warp,
+            });
+        } else {
+            if mv == Move::Warp {
+                gs.peak = to.d();
             }
+            gs.pose = to;
+            gs.anim = None;
+            gs.rim = rim1;
         }
         gs.moves
     };
@@ -1324,6 +1356,11 @@ fn cam_to(to: Pose, mv: Move) {
 /// `0`, the fit button, a double-click on empty space, and an empty selection: the whole graph at
 /// galaxy scale, from where the camera looks now. The selection is kept.
 pub fn fit() {
+    fit_by(Move::Cross(cam::EASE_MS));
+}
+
+/// The galaxy fit, eased across the band or flown (`Move::Warp`).
+fn fit_by(mv: Move) {
     let (to, rescaled) = {
         let mut gs = g();
         gs.autofit = true;
@@ -1337,7 +1374,7 @@ pub fn fit() {
         };
         (to, rescaled)
     };
-    cam_to(to, Move::Cross(cam::EASE_MS));
+    cam_to(to, mv);
     if rescaled {
         retier();
     }
@@ -1484,11 +1521,7 @@ pub fn orbit_by(d_theta: f64, d_psi: f64) {
 /// folder brings its region to system scale, the root the galaxy.
 pub fn focus_node(id: &str, d: Option<f64>) {
     let Some(d) = d else {
-        match id {
-            "." => fit(),
-            _ if state::idx().is_some_and(|x| x.is_dir(id)) => frame_region(id),
-            _ => frame_card(id),
-        }
+        focus_node_with(id, Move::Ease(cam::EASE_MS));
         return;
     };
     let to = {
@@ -1504,9 +1537,29 @@ pub fn focus_node(id: &str, d: Option<f64>) {
     cam_to(to, Move::Ease(cam::EASE_MS));
 }
 
+/// The camera onto a selection, at the scale it sets, by `mv`: eased (a folder's region and the
+/// galaxy fit ease across the band), or flown, as Enter and space fly to a walk's target. The
+/// root is the galaxy fit.
+pub fn focus_node_with(id: &str, mv: Move) {
+    let mv = match mv {
+        Move::Warp => Move::Warp,
+        _ => Move::Ease(cam::EASE_MS),
+    };
+    let across = if mv == Move::Warp {
+        mv
+    } else {
+        Move::Cross(cam::EASE_MS)
+    };
+    match id {
+        "." => fit_by(across),
+        _ if state::idx().is_some_and(|x| x.is_dir(id)) => frame_region(id, across),
+        _ => frame_card(id, mv),
+    }
+}
+
 /// A card is selected: focus scale, the camera turned and fitted to the card and its links in its
-/// region (`card_view`), eased while the graph is shown and cut while it is hidden.
-fn frame_card(id: &str) {
+/// region (`card_view`), eased (or flown) while the graph is shown and cut while it is hidden.
+fn frame_card(id: &str, mv: Move) {
     let (to, rescaled) = {
         let mut gs = g();
         let Some(&i) = gs.at.get(id) else { return };
@@ -1517,7 +1570,7 @@ fn frame_card(id: &str) {
         let r = gs.region_of(i);
         (to, gs.set_scale(Scale::Focus, r))
     };
-    cam_to(to, Move::Ease(cam::EASE_MS));
+    cam_to(to, mv);
     if rescaled {
         retier();
     }
@@ -1525,7 +1578,7 @@ fn frame_card(id: &str) {
 
 /// A folder is selected: its region, fitted to the pane from where the camera looks now, at
 /// system scale.
-fn frame_region(id: &str) {
+fn frame_region(id: &str, mv: Move) {
     let plan = {
         let mut gs = g();
         let Some(&i) = gs.at.get(id) else { return };
@@ -1547,21 +1600,37 @@ fn frame_region(id: &str) {
     };
     match plan {
         Some((to, rescaled)) => {
-            cam_to(to, Move::Cross(cam::EASE_MS));
+            cam_to(to, mv);
             if rescaled {
                 retier();
             }
         }
-        None => fit(),
+        None => fit_by(mv),
     }
 }
 
 // ---- selection -----------------------------------------------------------------------------
 
+/// How the camera arrives at a selection.
+pub enum Arrive {
+    /// eased to the view the selection sets
+    Solve,
+    /// flown there (Enter or space on a walk's target)
+    Warp,
+    /// back or forward through history: eased to the camera the entry recorded (a
+    /// `pose_state()` value), or, when it recorded none, as `Solve`
+    At(JsValue),
+}
+
 /// `updateGraph()`: the selection changed (or what is drawn did): the camera follows a new
 /// selection, from any source, to the scale it sets (a card solved for at focus scale, a folder's
 /// region at system scale, no selection the galaxy), then new instances and the hint.
 pub fn update() {
+    update_with(Arrive::Solve);
+}
+
+/// `update()`, with a new selection arriving as `how` says.
+pub fn update_with(how: Arrive) {
     let Some(idx) = state::idx() else { return };
     let sel = state::sel();
     let kids: Vec<String> = match sel.as_deref() {
@@ -1584,11 +1653,17 @@ pub fn update() {
         moved
     };
     if moved {
+        let mv = match how {
+            Arrive::Warp => Move::Warp,
+            _ => Move::Ease(cam::EASE_MS),
+        };
         match sel.as_deref() {
-            None | Some(".") => fit(),
-            Some(s) if idx.is_dir(s) => frame_region(s),
-            Some(s) => frame_card(s),
+            None => fit_by(Move::Cross(cam::EASE_MS)),
+            Some(s) => focus_node_with(s, mv),
         }
+    }
+    if let Arrive::At(st) = &how {
+        restore(st);
     }
     retier();
     let hint = {
@@ -1655,6 +1730,92 @@ fn set_hint(t: &str) {
     }
 }
 
+// ---- history -------------------------------------------------------------------------------
+
+/// Where the camera is going, for a history entry: `{pose: [x, y, z, θ, ψ, ln d], scale, region}`
+/// (the destination of a move in flight, never a pose part way through it), or null before the
+/// graph is built.
+pub fn pose_state() -> JsValue {
+    let (p, scale, region) = {
+        let gs = g();
+        if !gs.built {
+            return JsValue::NULL;
+        }
+        let region = gs
+            .region
+            .and_then(|r| gs.vis.regions.get(r).cloned())
+            .unwrap_or_default();
+        (gs.dest(), gs.scale.name(), region)
+    };
+    let pose = js_sys::Array::new();
+    for v in [
+        p.target[0],
+        p.target[1],
+        p.target[2],
+        p.theta,
+        p.psi,
+        p.ln_d,
+    ] {
+        pose.push(&v.into());
+    }
+    let o = js_sys::Object::new();
+    let set = |k: &str, v: &JsValue| {
+        let _ = js_sys::Reflect::set(&o, &JsValue::from_str(k), v);
+    };
+    set("pose", &pose);
+    set("scale", &JsValue::from_str(scale));
+    set("region", &JsValue::from_str(&region));
+    o.into()
+}
+
+/// Back or forward to a history entry that recorded the camera (`pose_state`): ease there, at the
+/// scale it was at. An entry with no camera leaves the move the selection made.
+fn restore(st: &JsValue) {
+    let get = |k: &str| js_sys::Reflect::get(st, &JsValue::from_str(k)).ok();
+    let Some(arr) = get("pose").filter(|v| v.is_object()) else {
+        return;
+    };
+    let v: Vec<f64> = js_sys::Array::from(&arr)
+        .iter()
+        .filter_map(|x| x.as_f64())
+        .collect();
+    if v.len() != 6 || v.iter().any(|x| !x.is_finite()) {
+        return;
+    }
+    let to = Pose {
+        target: [v[0], v[1], v[2]],
+        theta: v[3],
+        psi: v[4],
+        ln_d: v[5],
+    };
+    let scale = match get("scale").and_then(|s| s.as_string()).as_deref() {
+        Some("galaxy") => Some(Scale::Galaxy),
+        Some("system") => Some(Scale::System),
+        Some("focus") => Some(Scale::Focus),
+        _ => None,
+    };
+    let region = get("region").and_then(|s| s.as_string());
+    let (same, rescaled) = {
+        let mut gs = g();
+        let same = gs.dest() == to;
+        let r = region
+            .and_then(|n| gs.vis.regions.iter().position(|x| *x == n))
+            .or(gs.region);
+        let rescaled = match scale {
+            Some(Scale::Galaxy) => gs.set_scale(Scale::Galaxy, None),
+            Some(sc) => gs.set_scale(sc, r),
+            None => false,
+        };
+        (same, rescaled)
+    };
+    if !same {
+        cam_to(to, Move::Ease(cam::EASE_MS));
+    }
+    if rescaled {
+        retier();
+    }
+}
+
 // ---- drawing -------------------------------------------------------------------------------
 
 /// Ask for one frame (coalesces any number of requests).
@@ -1681,8 +1842,14 @@ fn frame_tick(now: f64) {
                 gs.anim = None;
             } else {
                 let e = cam::smootherstep(u);
-                gs.pose = cam::ease_pose(&a.from, &a.to, e);
+                gs.pose = match &a.warp {
+                    Some(w) => w.at(e),
+                    None => cam::ease_pose(&a.from, &a.to, e),
+                };
                 gs.rim = a.rim0 + (a.rim1 - a.rim0) * e;
+            }
+            if a.warp.is_some() {
+                gs.peak = gs.peak.max(gs.pose.d());
             }
         }
         render(&mut gs, now)
@@ -2240,6 +2407,7 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
         walk: walk.map(|(j, ..)| gs.ids[j].clone()).unwrap_or_default(),
         walk_at: gs.walk_at.filter(|_| walk.is_some()).unwrap_or((0, 0)),
         walk_angle: walk.map(|(.., a)| a),
+        peak: gs.peak,
     };
     Some((drawn, uploaded, labels))
 }

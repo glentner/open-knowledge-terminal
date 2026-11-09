@@ -721,6 +721,8 @@ pub struct Drawn {
     pub walk: String,
     pub walk_at: (usize, usize),
     pub walk_angle: Option<f64>,
+    /// the highest camera distance a frame of the last flight drew
+    pub peak: f64,
 }
 
 thread_local! {
@@ -760,7 +762,7 @@ pub fn publish(cv: &Element, d: &Drawn) {
             .collect::<Vec<_>>()
             .join(",")
     );
-    let vals: [(&'static str, String); 24] = [
+    let vals: [(&'static str, String); 25] = [
         ("data-scale", d.scale.to_string()),
         ("data-region", d.region.clone()),
         (
@@ -790,6 +792,7 @@ pub fn publish(cv: &Element, d: &Drawn) {
             "data-walk-angle",
             d.walk_angle.map(deg1).unwrap_or_default(),
         ),
+        ("data-peak", sig3(d.peak)),
         ("data-anim", if d.anim { "1" } else { "0" }.to_string()),
     ];
     HOOKS.with(|h| {

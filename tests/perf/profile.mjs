@@ -4,7 +4,10 @@
 //
 //   node tests/perf/profile.mjs --graph [--headless]
 // The graph's frame time, with a verdict: the camera orbiting by keys, by tilt keys and by a
-// circular drag ("orbit"), then the same with every card drawn ("orbit_all"). It targets $OKT
+// circular drag ("orbit"), then the same with every card drawn ("orbit_all"), then flights
+// ("warp"): from the most connected card, j and space (Enter on alternate trips) fly to the walk's
+// target and [ eases back, at least six round trips and on until 900 frames are recorded, frames
+// counting only while the camera moves (#graph data-anim="1"). It targets $OKT
 // only (tests/env.sh sets it; never 6580), runs headed in a 1600x1000 window at DPR 2, calibrates
 // the display's refresh for 1 s and warms up with one untimed orbit. It prints target=, mode=,
 // renderer=, refresh_ms=, one JSON line per scenario ({"scenario","frames","draws","p50","p95",
@@ -29,9 +32,12 @@ async function graphFrameTime() {
     // in the page: rAF intervals and the graph's drawn frames, recorded while __rec is set
     await ctx.addInitScript(() => {
       window.__rec = false; window.__iv = []; window.__draws = 0; window.__oktDraw = [];
+      // __animOnly: only frames while the graph's camera moves count (an interval between two of them)
+      window.__animOnly = false;
       let last = 0;
+      const moving = () => !window.__animOnly || document.getElementById('graph')?.getAttribute('data-anim') === '1';
       const loop = t => {
-        if (window.__rec) {
+        if (window.__rec && moving()) {
           if (last) window.__iv.push(t - last);
           window.__draws += window.__oktDraw.length;
           last = t;
@@ -85,16 +91,46 @@ async function graphFrameTime() {
     };
     // warm-up: one untimed orbit (shaders, JIT)
     await press('ArrowRight', 1000);
+    // the flights: a card to walk from (the most connected markdown file), then round trips
+    const idx = await (await fetch(OKT + 'api/index')).json();
+    const degree = {};
+    for (const e of idx.edges) { const [s, t] = Array.isArray(e) ? e : [e.s, e.t]; degree[s] = (degree[s] || 0) + 1; degree[t] = (degree[t] || 0) + 1; }
+    const hub = idx.nodes.filter(n => n.t === 'file' && n.id.endsWith('.md')).sort((a, b) => (degree[b.id] || 0) - (degree[a.id] || 0))[0].id;
+    const settle = async act => {
+      const m0 = await page.evaluate(() => document.getElementById('graph').getAttribute('data-move'));
+      await act();
+      await page.waitForFunction(m => document.getElementById('graph').getAttribute('data-move') !== m, m0, { timeout: 3000 }).catch(() => {});
+      await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+      await page.waitForFunction(() => document.getElementById('graph').getAttribute('data-anim') === '0', null, { timeout: 5000 }).catch(() => {});
+    };
+    let trips = 0;
+    const warp = async () => {
+      for (trips = 0; trips < 24 && (trips < 6 || (await page.evaluate(() => window.__iv.length)) < 900); trips++) {
+        await page.keyboard.press('j');
+        await page.waitForTimeout(80);
+        await page.waitForFunction(() => document.getElementById('graph').getAttribute('data-anim') === '0', null, { timeout: 5000 }).catch(() => {});
+        await settle(() => page.keyboard.press(trips % 2 ? 'Enter' : ' '));
+        await settle(() => page.keyboard.press('['));
+      }
+    };
     let fail = false;
-    for (const name of ['orbit', 'orbit_all']) {
+    for (const name of ['orbit', 'orbit_all', 'warp']) {
       // every card is drawn already; a show-all toggle, when the toolbar has one, is switched on
       if (name === 'orbit_all') {
         const all = page.locator('.gtools [data-z=all]');
         if (await all.count() && !(await all.evaluate(b => b.classList.contains('on')))) await all.click();
         await page.waitForTimeout(300);
       }
-      const r = await record(orbit);
-      const out = { scenario: name, frames: r.iv.length, draws: r.draws, p50: +pct(r.iv, 0.5).toFixed(1), p95: +pct(r.iv, 0.95).toFixed(1), max: +Math.max(0, ...r.iv).toFixed(1) };
+      // the flights run as the graph is by default: show all off, from a selected card
+      if (name === 'warp') {
+        const all = page.locator('.gtools [data-z=all]');
+        if (await all.count() && (await all.evaluate(b => b.classList.contains('on')))) await all.click();
+        await settle(() => page.evaluate(h => { location.hash = '#v=graph&s=' + encodeURIComponent(h); }, hub));
+        await page.waitForTimeout(300);
+        await page.evaluate(() => { document.activeElement?.blur(); window.__animOnly = true; });
+      }
+      const r = await record(name === 'warp' ? warp : orbit);
+      const out = { scenario: name, frames: r.iv.length, draws: r.draws, p50: +pct(r.iv, 0.5).toFixed(1), p95: +pct(r.iv, 0.95).toFixed(1), max: +Math.max(0, ...r.iv).toFixed(1), ...(name === 'warp' ? { trips } : {}) };
       console.log(JSON.stringify(out));
       if (headless) continue;
       if (out.p95 <= BOUND) console.log(`PASS ${name} p95=${out.p95} <= ${BOUND}`);
