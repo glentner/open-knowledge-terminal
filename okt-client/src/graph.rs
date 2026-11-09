@@ -19,16 +19,20 @@
 //! else but the region glyphs; or every card and link under "show all".
 //!
 //! At most `labels::MAX_CARD_LABELS` cards are named at once, flat on the overlay: the focus and
-//! its links (or, under show all, every card), by tier and then importance, never two labels on
-//! top of each other. Which cards are named is decided when the camera comes to rest and frozen
-//! while it moves; each frame only re-picks the side each label sits on, and hides one that fits
-//! nowhere, so nothing pops in mid-motion and nothing overlaps.
+//! its links (or, under show all, every card), by tier and then importance. One placer
+//! (`labels::place`) puts every piece of overlay text, the region names and the collapsed
+//! folders' counts included, so nothing it draws overlaps anything else it draws: no two rects,
+//! and no leader line (from a name moved away from its glyph) through a rect or another leader.
+//! Which cards are named is decided when the camera comes to rest and frozen while it moves;
+//! each frame only re-picks the side each label sits on, and hides one that fits nowhere, so
+//! nothing pops in mid-motion and nothing overlaps. The walk target's label is always placed.
 //!
 //! `z` re-solves the camera without moving a card: for the selection and its links, as a
 //! selection is solved, or for a results list's matches where they are, across regions. `j`/`k`
 //! walk the selection's connections clockwise on screen, from 12 o'clock around the selection, in
-//! an order taken when the walk starts and kept while the camera holds still; a connection in
-//! another region is a portal, its edge out to that region's glyph on the rim. Enter or space
+//! an order taken from the pose each step shows (a re-fit of the walk's own re-sorts it from the
+//! target); a connection in another region is a portal, its edge out to that region's glyph on
+//! the rim. Enter or space
 //! flies to the walk's target: the camera rises toward galaxy scale and comes down on it
 //! (`cam::warp`). Each history entry records where the camera was going (`pose_state`), and back
 //! and forward ease the camera to it.
@@ -95,8 +99,14 @@ const BUNDLE_SEGS: usize = 12;
 const LABEL_REST_MS: f64 = 150.0;
 /// A portal label's path is cut in the middle to this many characters.
 const PORTAL_CHARS: usize = 34;
+/// A region name with no room in its own size or in smaller type (`--glab-small`) is cut in the
+/// middle to this many characters.
+const REGION_CHARS: usize = 8;
 /// A walk target closer than this to the pane's edge (CSS px) is re-fitted into view.
 const WALK_MARGIN: f64 = 40.0;
+/// ... and one closer than this to the pane's chrome (the legend, the toolbar, the hint, the
+/// compass).
+const CHROME_MARGIN: f64 = 12.0;
 
 // ---- collapse: which node stands for each id -------------------------------------------------
 
@@ -453,6 +463,16 @@ struct Pick {
 
 /// A region's name, to place beside its glyph at (`x`, `y`), radius `r` px, leaning toward
 /// `lean` (the pane centre, for a glyph on the rim). Larger `prio` is placed first.
+/// A collapsed folder drawn with its ring: the node, its point and ring radius in pane CSS px,
+/// and its file count, which the labels place beside the ring.
+struct CountAt {
+    i: usize,
+    x: f64,
+    y: f64,
+    r: f64,
+    text: String,
+}
+
 struct Name {
     x: f64,
     y: f64,
@@ -763,6 +783,26 @@ impl G {
             portal: glyph.is_some(),
             path,
         }
+    }
+    /// How far above its corner the compass sits: clear of the legend when the legend reaches
+    /// under it.
+    fn compass_lift(&self) -> f64 {
+        if self.chrome.2 > self.w - overlay::COMPASS_INSET - overlay::COMPASS_PX - 4.0 {
+            self.chrome.1
+        } else {
+            0.0
+        }
+    }
+    /// The pane's chrome as rects in pane CSS px: the toolbar, the legend, the hint and the
+    /// compass. Labels keep clear of them, and the walk counts a target under one as off the
+    /// pane.
+    fn chrome_obstacles(&self) -> Vec<labels::Rect> {
+        let mut out = self.chrome_rects.clone();
+        out.extend(self.hint_rect);
+        if self.colors.is_some() {
+            out.push(overlay::compass_box(self.w, self.h, self.compass_lift()));
+        }
+        out
     }
     /// The selection's point under `pose`, the centre the walk turns about (the pane centre when
     /// it does not project).
@@ -2265,7 +2305,7 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
     // cues on the points on the pane: an uncommitted card's dot at its upper right; a collapsed
     // folder's ring, and the count of files under it beside the ring (on the overlay)
     let mut dirty_ids: Vec<&str> = Vec::new();
-    let mut badges: Vec<overlay::Badge> = Vec::new();
+    let mut count_at: Vec<CountAt> = Vec::new();
     if let Some(c) = gs.colors.as_ref() {
         for &(s, i, x, y) in &items {
             let i = i as usize;
@@ -2282,11 +2322,12 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
             if v.collapsed && !gs.show_all {
                 let rr = r + 3.0;
                 gly.marks.push(mark([x, y], rr, gl::mark::RING, rgba(c.fam(&v.fam), 0.9)));
-                badges.push(overlay::Badge {
-                    x: x + rr * 0.7,
-                    y: y - rr * 0.7,
+                count_at.push(CountAt {
+                    i,
+                    x,
+                    y,
+                    r: rr,
                     text: format!("{}", v.files as u64),
-                    id: gs.ids[i].to_string(),
                 });
             }
         }
@@ -2392,20 +2433,11 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
             .map(|g| g.core),
         scale: gs.scale.name(),
         // above the legend when the legend reaches under the compass
-        lift: if gs.chrome.2 > gs.w - overlay::COMPASS_INSET - overlay::COMPASS_PX - 4.0 {
-            gs.chrome.1
-        } else {
-            0.0
-        },
+        lift: gs.compass_lift(),
         ink: c.compass.0.clone(),
         far: c.compass.1.clone(),
         accent: accent_css.clone(),
     });
-    let badge_rects: Vec<labels::Rect> = gs
-        .ov
-        .as_ref()
-        .map(|ov| badges.iter().map(|b| ov.badge_rect(b)).collect())
-        .unwrap_or_default();
     let labels = place_labels(
         gs,
         now,
@@ -2415,8 +2447,8 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
         &items,
         &names,
         &gly.at,
-        compass.as_ref(),
-        &badge_rects,
+        compass.is_some(),
+        &count_at,
     );
     if let Some(ov) = &gs.ov {
         ov.draw(
@@ -2426,14 +2458,41 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
             &accent_css,
             &rings,
             &labels.0,
-            &badges,
             compass.as_ref(),
         );
     }
-    let counts_json = serde_json::to_string(
-        &badges.iter().map(|b| [b.id.as_str(), b.text.as_str()]).collect::<Vec<_>>(),
+    // the hooks of what the overlay drew: the counts placed (a count with no room is not drawn),
+    // the walk target's label, and where each region's glyph is
+    let r1 = |v: f64| (v * 10.0).round() / 10.0;
+    let counts_json = serde_json::Value::Array(
+        labels
+            .0
+            .iter()
+            .filter(|p| p.kind == labels::Kind::Count)
+            .map(|p| serde_json::json!([gs.ids[p.key], p.text, r1(p.x), r1(p.y), r1(p.w), r1(p.h)]))
+            .collect(),
     )
-    .unwrap_or_default();
+    .to_string();
+    let walk_label = labels
+        .0
+        .iter()
+        .find(|p| p.walk)
+        .map(|p| {
+            serde_json::json!([r1(p.x), r1(p.y), r1(p.w), r1(p.h), p.text, gs.ids[p.key]])
+                .to_string()
+        })
+        .unwrap_or_default();
+    let glyphs_json = serde_json::Value::Object(
+        gly.at
+            .iter()
+            .enumerate()
+            .filter_map(|(r, at)| {
+                let [x, y] = (*at)?;
+                Some((gs.vis.regions.get(r)?.clone(), serde_json::json!([r1(x), r1(y)])))
+            })
+            .collect(),
+    )
+    .to_string();
     gs.picks = picks;
     let (edges, gl_bundles) = counts?;
     let drawn = gl::Drawn {
@@ -2471,6 +2530,8 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
         peak: gs.peak,
         dirty: dirty_json,
         counts: counts_json,
+        walk_label,
+        glyphs: glyphs_json,
     };
     Some((drawn, uploaded, labels))
 }
@@ -2479,12 +2540,18 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
 ///
 /// The candidates are the cards drawn at tier 0 and 1 (the focus and its links, each link in
 /// another region as a portal labelled with its path), or every card drawn under show all; at
-/// galaxy scale there are none, except under show all with a selection. Which of them are labelled is chosen when the
-/// tiers, the walk target or the pane change, and again once the camera has been still for
-/// `LABEL_REST_MS`; while it moves, only the cards chosen last are placed again (each trying the
-/// side it was on first, hidden for a frame where it fits nowhere), with the walk target always
-/// among them. A card is labelled at its point when the point is on the pane; a portal whose card
-/// is off the pane is labelled at its region's glyph.
+/// galaxy scale there are none, except under show all with a selection. Which of them are
+/// labelled is chosen when the tiers, the walk target or the pane change, and again once the
+/// camera has been still for `LABEL_REST_MS`; while it moves, only the cards chosen last are
+/// placed again (each trying the side it was on first, hidden for a frame where it fits nowhere),
+/// with the walk target always among them. A card is labelled at its point when the point is on
+/// the pane; a portal whose card is off the pane is labelled at its region's glyph.
+///
+/// The walk target is labelled at any scale, wherever it is: at its point, at its region's glyph,
+/// or at its rim point when it has neither; and it brings its shorter forms (its path or name
+/// cut in the middle, then in smaller type, `--glab-small`), so it is placed whenever the pane has
+/// room. Region names bring theirs (smaller type, then cut). Each collapsed folder's count is placed beside
+/// its ring by the same placer, so it never lands on another count or a label.
 #[allow(clippy::too_many_arguments)]
 fn place_labels(
     gs: &mut G,
@@ -2495,9 +2562,17 @@ fn place_labels(
     items: &[(f64, u32, f64, f64)],
     names: &[Name],
     glyph_at: &[Option<[f64; 2]>],
-    compass: Option<&overlay::Compass>,
-    badges: &[labels::Rect],
+    compass: bool,
+    counts: &[CountAt],
 ) -> (Vec<labels::Placed>, usize) {
+    // where the walk target shows when it has no point on the pane and no glyph to sit at
+    let walk_rim = gs
+        .cursor
+        .map(|j| gs.walk_spot(j, pose, pane, gs.rim, "").rim);
+    let mut obstacles = gs.chrome_obstacles();
+    if !compass && gs.colors.is_some() {
+        obstacles.pop();
+    }
     let Some(ov) = gs.ov.as_ref() else {
         return (Vec::new(), 0);
     };
@@ -2524,85 +2599,117 @@ fn place_labels(
     let centre = [pane.w / 2.0, pane.h / 2.0];
     let inside = |x: f64, y: f64| x >= 0.0 && y >= 0.0 && x <= pane.w && y <= pane.h;
     let px_r = |i: usize, s: f64| (gs.nodes[i].r * unit / s).clamp(1.6, POINT_MAX_PX);
+    let lean_in = |g: [f64; 2]| {
+        let (dx, dy) = (centre[0] - g[0], centre[1] - g[1]);
+        let l = dx.hypot(dy).max(1e-9);
+        [dx / l, dy / l]
+    };
     let mut cands: Vec<labels::Cand> = Vec::new();
     let mut n_cands = 0;
     let mut focus_disc = None;
-    // a walk target behind the camera has no point; as a portal it is still named at its glyph
+    // a walk target behind the camera has no point; it is still named, at its glyph or its rim
     let behind = gs
         .cursor
         .filter(|&j| !items.iter().any(|it| it.1 as usize == j))
         .map(|j| (f64::NAN, j as u32, f64::NAN, f64::NAN));
-    if any_scale {
-        for &(s, i, x, y) in items.iter().chain(behind.iter()) {
-            let i = i as usize;
-            let v = &gs.nodes[i];
-            if Some(i) == gs.sel {
-                let r = px_r(i, s);
-                focus_disc = Some(labels::Rect {
-                    x: x - r,
-                    y: y - r,
-                    w: 2.0 * r,
-                    h: 2.0 * r,
-                });
-            }
-            let tier = gs
-                .inst
-                .col
-                .get(i * 4 + 3)
-                .map(|c| tier_code(*c))
-                .unwrap_or(4);
-            if v.kind == Kind::Root || tier > 3 || (!gs.show_all && tier > 1) {
-                continue;
-            }
-            if !s.is_nan() {
-                n_cands += 1;
-            }
-            let walk = Some(i) == gs.cursor;
-            if !choose && !walk && !lab.set.contains(&i) {
-                continue;
-            }
-            let portal = gs.portals.iter().find(|p| p.to == i);
-            let (kind, text) = match (portal, v.kind) {
-                // the walk's target names its whole path, so it can be told where the walk goes
-                (Some(_), _) if walk => (labels::Kind::Portal, gs.ids[i].as_str()),
-                (Some(_), _) => (labels::Kind::Portal, texts[i].1.as_str()),
-                _ if Some(i) == gs.sel => (labels::Kind::Focus, texts[i].0.as_str()),
-                (_, Kind::Dir) => (labels::Kind::Folder, texts[i].0.as_str()),
-                _ => (labels::Kind::Card, texts[i].0.as_str()),
-            };
-            // where it is named: at its point on the pane, or a portal at its region's glyph
-            let at = if inside(x, y) {
-                Some((x, y, px_r(i, s), [0.0, 0.0]))
-            } else {
-                portal
-                    .and_then(|p| glyph_at.get(p.region).copied().flatten())
-                    .map(|g| {
-                        let (dx, dy) = (centre[0] - g[0], centre[1] - g[1]);
-                        let l = dx.hypot(dy).max(1e-9);
-                        (g[0], g[1], RIM_PX + 2.0, [dx / l, dy / l])
-                    })
-            };
-            let Some((x, y, r, lean)) = at else { continue };
-            let (w, h) = ov.measure(kind, text);
-            cands.push(labels::Cand {
-                key: i,
-                kind,
-                x,
-                y,
-                r,
-                w,
-                h,
-                tier: tier as u8,
-                walk,
-                importance: v.r,
-                path: gs.ids[i].as_str(),
-                text,
-                lean,
+    for &(s, i, x, y) in items.iter().chain(behind.iter()) {
+        let i = i as usize;
+        let v = &gs.nodes[i];
+        let walk = Some(i) == gs.cursor;
+        if !any_scale && !walk {
+            continue;
+        }
+        if any_scale && Some(i) == gs.sel {
+            let r = px_r(i, s);
+            focus_disc = Some(labels::Rect {
+                x: x - r,
+                y: y - r,
+                w: 2.0 * r,
+                h: 2.0 * r,
             });
         }
+        let tier = gs
+            .inst
+            .col
+            .get(i * 4 + 3)
+            .map(|c| tier_code(*c))
+            .unwrap_or(4);
+        let listed = any_scale && tier <= 3 && (gs.show_all || tier <= 1);
+        if v.kind == Kind::Root || !(listed || walk) {
+            continue;
+        }
+        if listed && !s.is_nan() {
+            n_cands += 1;
+        }
+        if !choose && !walk && !lab.set.contains(&i) {
+            continue;
+        }
+        let portal = gs.portals.iter().find(|p| p.to == i);
+        let (kind, text) = match (portal, v.kind) {
+            // the walk's target names its whole path, so it can be told where the walk goes
+            (Some(_), _) if walk => (labels::Kind::Portal, gs.ids[i].as_str()),
+            (Some(_), _) => (labels::Kind::Portal, texts[i].1.as_str()),
+            _ if Some(i) == gs.sel => (labels::Kind::Focus, texts[i].0.as_str()),
+            (_, Kind::Dir) => (labels::Kind::Folder, texts[i].0.as_str()),
+            _ => (labels::Kind::Card, texts[i].0.as_str()),
+        };
+        // where it is named: at its point on the pane, a portal at its region's glyph, the walk
+        // target at its rim point
+        let at = if inside(x, y) {
+            Some((x, y, px_r(i, s), [0.0, 0.0]))
+        } else {
+            portal
+                .and_then(|p| glyph_at.get(p.region).copied().flatten())
+                .map(|g| (g[0], g[1], RIM_PX + 2.0, lean_in(g)))
+                .or_else(|| {
+                    walk_rim
+                        .filter(|_| walk)
+                        .map(|g| (g[0], g[1], RIM_PX, lean_in(g)))
+                })
+        };
+        let Some((x, y, r, lean)) = at else { continue };
+        let (w, h) = ov.measure(kind, text);
+        let alts = if walk {
+            let cuts: &[usize] = if kind == labels::Kind::Portal {
+                &[PORTAL_CHARS, 22, 14]
+            } else {
+                &[24, 14]
+            };
+            shorter_forms(ov, kind, text, cuts)
+        } else {
+            Vec::new()
+        };
+        cands.push(labels::Cand {
+            key: i,
+            kind,
+            x,
+            y,
+            r,
+            w,
+            h,
+            tier: tier as u8,
+            walk,
+            importance: v.r,
+            path: gs.ids[i].as_str(),
+            text,
+            lean,
+            alts,
+        });
     }
     for n in names {
         let (w, h) = ov.measure(labels::Kind::Region, &n.text);
+        let small = ov.measure_at(labels::Kind::Region, &n.text, ov.small());
+        let mut alts = vec![labels::Alt {
+            text: n.text.clone(),
+            w: small.0,
+            h: small.1,
+            scale: ov.small(),
+        }];
+        alts.extend(
+            shorter_forms(ov, labels::Kind::Region, &n.text, &[REGION_CHARS])
+                .into_iter()
+                .filter(|a| a.scale != 1.0),
+        );
         cands.push(labels::Cand {
             key: usize::MAX,
             kind: labels::Kind::Region,
@@ -2617,17 +2724,37 @@ fn place_labels(
             path: "",
             text: &n.text,
             lean: n.lean,
+            alts,
         });
     }
-    let mut obstacles: Vec<labels::Rect> = gs.chrome_rects.clone();
-    obstacles.extend(gs.hint_rect);
-    obstacles.extend(compass.map(|c| overlay::compass_box(gs.w, gs.h, c.lift)));
+    for c in counts {
+        let (w, h) = ov.measure(labels::Kind::Count, &c.text);
+        cands.push(labels::Cand {
+            key: c.i,
+            kind: labels::Kind::Count,
+            x: c.x,
+            y: c.y,
+            r: c.r,
+            w,
+            h,
+            tier: 0,
+            walk: false,
+            importance: 0.0,
+            path: "",
+            text: &c.text,
+            lean: [0.0, 0.0],
+            alts: Vec::new(),
+        });
+    }
     obstacles.extend(focus_disc);
-    obstacles.extend_from_slice(badges);
     let anchors = &lab.anchors;
-    let placed = labels::place(&cands, &obstacles, (gs.w, gs.h), &|k| {
-        anchors.get(&k).copied()
-    });
+    // at rest every label searches the whole pane for room; in motion only near its point
+    let last = |k: usize| anchors.get(&k).copied();
+    let placed = if resting {
+        labels::place(&cands, &obstacles, (gs.w, gs.h), &last)
+    } else {
+        labels::place_moving(&cands, &obstacles, (gs.w, gs.h), &last)
+    };
     for p in placed.iter().filter(|p| p.kind.counted()) {
         lab.anchors.insert(p.key, p.anchor);
     }
@@ -2643,6 +2770,41 @@ fn place_labels(
         }
     }
     (placed, n_cands)
+}
+
+/// A label's shorter forms, tried in turn once its text fits nowhere: `text` cut in the middle
+/// to each length in `cuts` (those shorter than the form before), then the shortest in smaller
+/// type.
+fn shorter_forms(
+    ov: &overlay::Overlay,
+    kind: labels::Kind,
+    text: &str,
+    cuts: &[usize],
+) -> Vec<labels::Alt> {
+    let mut out: Vec<labels::Alt> = Vec::new();
+    let mut last = text.to_string();
+    for &m in cuts {
+        let t = labels::ellipsize_middle(text, m);
+        if t.chars().count() < last.chars().count() {
+            let (w, h) = ov.measure(kind, &t);
+            out.push(labels::Alt {
+                text: t.clone(),
+                w,
+                h,
+                scale: 1.0,
+            });
+            last = t;
+        }
+    }
+    let small = ov.small();
+    let (w, h) = ov.measure_at(kind, &last, small);
+    out.push(labels::Alt {
+        text: last,
+        w,
+        h,
+        scale: small,
+    });
+    out
 }
 
 /// When a test has put an array on `window.__oktDraw`, keep the last few hundred frame times on it
@@ -2731,12 +2893,14 @@ fn walk_order(list: Vec<(String, &'static str)>, pose: &Pose) -> Vec<(String, &'
 
 /// j and k in the graph: step through the selection's connections (`insp::walk_list`) in
 /// on-screen angular order, clockwise around the selection from 12 o'clock like a clock hand.
-/// The order is taken from where the camera is going and kept for the walk; an orbit or a zoom
-/// re-sorts it and finds the target again by id. The target is marked with a dashed ring, a
-/// thicker edge and its inspector chip, and the hint says where the walk is; a link in another
-/// region is a portal, its edge out to that region's glyph on the rim labelled with its path.
-/// The camera holds still, but for a small re-fit when the target is off the pane and not at the
-/// rim. Enter or space goes there; esc stops.
+/// The order is taken from where the camera is going, so each step goes to the next target
+/// clockwise as the pane shows them: an orbit or a zoom re-sorts it and finds the target again
+/// by id. The target is marked with a dashed ring, a thicker edge, its label (always placed) and
+/// its inspector row, and the hint says where the walk is; a link in another region is a portal,
+/// its edge out to that region's glyph on the rim labelled with its path. The camera holds
+/// still, but for a small re-fit when the target is off the pane or under its chrome and not at
+/// the rim; the re-fit's pose re-sorts the order from the target, which keeps its place in the
+/// walk. Enter or space goes there; esc stops.
 pub fn walk(step: i64) {
     let Some(idx) = state::idx() else { return };
     let Some(sel) = state::sel() else {
@@ -2805,22 +2969,31 @@ pub fn walk(step: i64) {
         let pane = gs.pane();
         let dest = gs.dest();
         let w = rim_of(gs.scale);
+        // the pane less its margin and its chrome: a point under the legend, the toolbar, the
+        // hint or the compass is as good as off the pane
+        let chrome = gs.chrome_obstacles();
+        let clear = |p: [f64; 2]| {
+            p[0] >= WALK_MARGIN
+                && p[1] >= WALK_MARGIN
+                && p[0] <= pane.w - WALK_MARGIN
+                && p[1] <= pane.h - WALK_MARGIN
+                && chrome.iter().all(|r| {
+                    p[0] < r.x - CHROME_MARGIN
+                        || p[0] > r.x + r.w + CHROME_MARGIN
+                        || p[1] < r.y - CHROME_MARGIN
+                        || p[1] > r.y + r.h + CHROME_MARGIN
+                })
+        };
         gs.cursor.filter(|_| gs.w > 0.0).and_then(|j| {
             let spot = gs.walk_spot(j, &dest, pane, w, "");
-            let shown = spot.portal
-                || spot.px.is_some_and(|p| {
-                    p[0] >= WALK_MARGIN
-                        && p[1] >= WALK_MARGIN
-                        && p[0] <= pane.w - WALK_MARGIN
-                        && p[1] <= pane.h - WALK_MARGIN
-                });
-            if shown {
+            if spot.portal || spot.px.is_some_and(clear) {
                 return None;
             }
-            // the same target and angles, just far enough out to take the target in too
+            // the same target and angles, just far enough out to take the target in too, and
+            // further while it is still under the chrome (never past the galaxy fit)
             let mut pts = vec![gs.space.pos[j]];
             pts.extend(gs.sel.map(|i| gs.space.pos[i]));
-            let d = cam::fit_distance(
+            let mut d = cam::fit_distance(
                 &pts,
                 dest.target,
                 dest.theta,
@@ -2830,21 +3003,40 @@ pub fn walk(step: i64) {
                 gs.d_min(),
             )
             .max(dest.d());
-            Some(Pose {
+            let far = gs.d_galaxy().max(dest.d());
+            let at_d = |d: f64| Pose {
                 ln_d: d.ln(),
                 ..dest
-            })
+            };
+            while d < far {
+                let p = cam::project(gs.space.pos[j], &at_d(d), pane);
+                if p.is_some_and(|q| clear([q[0], q[1]])) {
+                    break;
+                }
+                d = (d * 1.15).min(far);
+            }
+            Some(at_d(d))
         })
     };
     if let Some(to) = refit {
         cam_to(to, Move::Ease(cam::EASE_MS));
-        // the walk's own move keeps its order
+        // the step shows the new pose, so the order is taken again under it, from the target:
+        // the target keeps its place in the walk, and j and k go on clockwise as it now shows
         let dest = g().dest();
-        WALK.with(|w| {
-            if let Some(w) = w.borrow_mut().as_mut() {
-                w.pose = dest;
-            }
-        });
+        let held = WALK.with(|w| w.borrow().as_ref().map(|w| (w.list.clone(), w.i)));
+        if let Some((list, Some(i))) = held {
+            let sorted = walk_order(list, &dest);
+            let n = sorted.len();
+            let k = sorted.iter().position(|(m, _)| *m == target).unwrap_or(i);
+            let list: Vec<(String, &'static str)> =
+                (0..n).map(|q| sorted[(q + k + n - i) % n].clone()).collect();
+            WALK.with(|w| {
+                if let Some(w) = w.borrow_mut().as_mut() {
+                    w.list = list;
+                    w.pose = dest;
+                }
+            });
+        }
     }
     insp::mark_chip(Some(&target));
     let shown = if target.ends_with('/') {

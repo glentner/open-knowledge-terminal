@@ -3,10 +3,10 @@ slug: graph-galaxy
 title: The graph as a navigable 3D space (galaxy, system, focus)
 kind: feature
 appetite: big
-status: blocked
+status: in_progress
 branch: feat/graph-galaxy
 base: main
-current_phase: done
+current_phase: P5
 last_updated: '2026-11-08'
 phases:
 - id: P1
@@ -59,7 +59,7 @@ phases:
   verify: sh spec/graph-galaxy/verify/gate.sh P7
 - id: P5
   name: Flat label overlay and compass
-  status: done
+  status: in_progress
   satisfies:
   - R9
   depends_on:
@@ -67,10 +67,10 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/graph-galaxy/verify/gate.sh P5
+  verify: sh spec/graph-galaxy/verify/gate.sh P7
 - id: P6
   name: z framing and the angular walk with portals
-  status: done
+  status: in_progress
   satisfies:
   - R4
   - R5

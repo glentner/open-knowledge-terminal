@@ -1,6 +1,7 @@
 //! The flat overlay: a second canvas over `#graph`, pointer-transparent and sized to the pane at
 //! the device pixel ratio, for marks that stay crisp and flat whatever the camera does. It draws
-//! the labels `labels::place` placed (region names and card labels, never in perspective), the
+//! the text `labels::place` placed (region names, card labels and collapsed folders' counts, never
+//! in perspective, with the leader lines of those placed away from their points), the
 //! pointer's hover ring, the keyboard walk's dashed ring, the flash after a live change, and the
 //! compass in the bottom-right corner (the galaxy's axes and horizon as the camera sees them, the
 //! focused region's direction, the scale), which labels keep clear of. Its text takes the
@@ -8,9 +9,9 @@
 //! labels, knocked out of the background in `--graph-bg`. It is also where CSS colours are turned
 //! into numbers for the GL.
 //!
-//! Each label is measured with the font it is drawn in, and its text is clipped to the rect it
-//! was placed in, so what `#graph[data-labels]` says was drawn is what was drawn: the hook is
-//! written from the same list.
+//! Each label is measured with the font it is drawn in (a smaller form at its own scale), and its
+//! text is clipped to the rect it was placed in, so what `#graph[data-labels]` says was drawn is
+//! what was drawn: the hook is written from the same list.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -31,8 +32,8 @@ struct Face {
 /// The overlay's text styles, read from the `#goverlay` rule: region names (the rule's own font
 /// and colour), card labels (`--glab-font`, `--glab-ink`), the focus's label (`--glab-focus-font`
 /// in `--glab-accent`) and portal labels (the card font in `--glab-accent`); and the leader line
-/// from a rim glyph to a name placed away from it (`--glab-leader`); and a collapsed folder's
-/// file count (`--glab-count-font` in `--glab-count-ink`).
+/// from a point to a label placed away from it (`--glab-leader`); a collapsed folder's file count
+/// (`--glab-count-font` in `--glab-count-ink`); and the smaller form's scale (`--glab-small`).
 struct Style {
     region: Face,
     card: Face,
@@ -41,6 +42,8 @@ struct Style {
     count: Face,
     knockout: String,
     leader: String,
+    /// the scale a crowded label's smaller form takes of its font (`--glab-small`)
+    small: f64,
 }
 
 impl Style {
@@ -50,6 +53,7 @@ impl Style {
             Kind::Focus => &self.focus,
             Kind::Portal => &self.portal,
             Kind::Card | Kind::Folder => &self.card,
+            Kind::Count => &self.count,
         }
     }
 }
@@ -66,7 +70,24 @@ fn class(k: Kind) -> usize {
         Kind::Region => 0,
         Kind::Focus => 1,
         Kind::Card | Kind::Folder | Kind::Portal => 2,
+        Kind::Count => 3,
     }
+}
+
+/// A CSS font shorthand with its px size scaled by `s`.
+fn scaled(font: &str, s: f64) -> String {
+    if s == 1.0 {
+        return font.to_string();
+    }
+    font.split_whitespace()
+        .map(
+            |t| match t.strip_suffix("px").and_then(|n| n.parse::<f64>().ok()) {
+                Some(v) => format!("{}px", (v * s * 100.0).round() / 100.0),
+                None => t.to_string(),
+            },
+        )
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The compass's box: this many CSS px square, this far in from the pane's bottom-right corner.
@@ -87,16 +108,6 @@ pub struct Compass {
     pub ink: String,
     pub far: String,
     pub accent: String,
-}
-
-/// A collapsed folder's file count, its text's bottom-left corner at (`x`, `y`) pane CSS px,
-/// beside the folder's ring.
-pub struct Badge {
-    pub x: f64,
-    pub y: f64,
-    pub text: String,
-    /// the folder, for the `data-counts` hook
-    pub id: String,
 }
 
 /// One ring, at pane CSS px.
@@ -123,8 +134,8 @@ pub struct Overlay {
     cv: HtmlCanvasElement,
     ctx: CanvasRenderingContext2d,
     style: RefCell<Style>,
-    /// text widths per font (see `class`, then the count's), keyed by text, cleared when the
-    /// style is read again
+    /// text widths per font (see `class`), keyed by text (and the scale, for a smaller form),
+    /// cleared when the style is read again
     widths: RefCell<[HashMap<String, f64>; 4]>,
 }
 
@@ -149,6 +160,7 @@ impl Overlay {
                 count: face("700 8.5px monospace", "#999"),
                 knockout: "#000".into(),
                 leader: "#666".into(),
+                small: 0.85,
             }),
             widths: RefCell::new(Default::default()),
         };
@@ -195,6 +207,12 @@ impl Overlay {
         if let Some(c) = get("--glab-leader") {
             st.leader = c;
         }
+        if let Some(v) = get("--glab-small")
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| *v > 0.2 && *v <= 1.0)
+        {
+            st.small = v;
+        }
         st.knockout = knockout.to_string();
         for w in self.widths.borrow_mut().iter_mut() {
             w.clear();
@@ -205,48 +223,38 @@ impl Overlay {
     /// gives it in the font it is drawn in (cached), with a px either side for the knockout, and
     /// a line of that font.
     pub fn measure(&self, k: Kind, text: &str) -> (f64, f64) {
+        self.measure_at(k, text, 1.0)
+    }
+
+    /// The scale of a crowded label's smaller form (`--glab-small`).
+    pub fn small(&self) -> f64 {
+        self.style.borrow().small
+    }
+
+    /// `measure`, in the kind's font scaled by `scale` (a label's smaller form).
+    pub fn measure_at(&self, k: Kind, text: &str, scale: f64) -> (f64, f64) {
         let st = self.style.borrow();
         let face = st.face(k);
-        let h = (face.size * 1.25).ceil();
+        let h = (face.size * scale * 1.25).ceil();
         let c = class(k);
-        if let Some(w) = self.widths.borrow()[c].get(text) {
+        let key = if scale == 1.0 {
+            text.to_string()
+        } else {
+            format!("{scale}\u{1}{text}")
+        };
+        if let Some(w) = self.widths.borrow()[c].get(&key) {
             return (*w, h);
         }
-        self.ctx.set_font(&face.font);
+        self.ctx.set_font(&scaled(&face.font, scale));
         let w = self
             .ctx
             .measure_text(text)
             .map(|m| m.width())
-            .unwrap_or(text.chars().count() as f64 * 6.5)
+            .unwrap_or(text.chars().count() as f64 * 6.5 * scale)
             .ceil()
             + 2.0;
-        self.widths.borrow_mut()[c].insert(text.to_string(), w);
+        self.widths.borrow_mut()[c].insert(key, w);
         (w, h)
-    }
-
-    /// The rect a badge's text takes, in CSS px (an obstacle for the labels).
-    pub fn badge_rect(&self, b: &Badge) -> Rect {
-        let st = self.style.borrow();
-        let h = (st.count.size * 1.25).ceil();
-        let cached = self.widths.borrow()[3].get(&b.text).copied();
-        let w = cached.unwrap_or_else(|| {
-            self.ctx.set_font(&st.count.font);
-            let w = self
-                .ctx
-                .measure_text(&b.text)
-                .map(|m| m.width())
-                .unwrap_or(b.text.chars().count() as f64 * 5.5)
-                .ceil()
-                + 2.0;
-            self.widths.borrow_mut()[3].insert(b.text.clone(), w);
-            w
-        });
-        Rect {
-            x: b.x,
-            y: b.y - h,
-            w,
-            h,
-        }
     }
 
     /// A CSS colour as straight RGBA in 0–1: the browser canonicalises it through `fillStyle`
@@ -258,8 +266,8 @@ impl Overlay {
         parse_color(&s).unwrap_or([0.5, 0.5, 0.5, 1.0])
     }
 
-    /// Clear to the pane's size at `dpr`, draw the compass and exactly the labels given, and
-    /// stroke the rings in `color`.
+    /// Clear to the pane's size at `dpr`, draw the compass and exactly the labels given (counts
+    /// among them), and stroke the rings in `color`.
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &self,
@@ -269,7 +277,6 @@ impl Overlay {
         color: &str,
         rings: &[Ring],
         labels: &[Placed],
-        badges: &[Badge],
         compass: Option<&Compass>,
     ) {
         let (bw, bh) = ((w * dpr).round() as u32, (h * dpr).round() as u32);
@@ -280,14 +287,13 @@ impl Overlay {
         let ctx = &self.ctx;
         ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
         ctx.clear_rect(0.0, 0.0, bw as f64, bh as f64);
-        if rings.is_empty() && labels.is_empty() && badges.is_empty() && compass.is_none() {
+        if rings.is_empty() && labels.is_empty() && compass.is_none() {
             return;
         }
         ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0).ok();
         if let Some(c) = compass {
             self.compass(w, h, c);
         }
-        self.badges(badges);
         self.labels(labels);
         if rings.is_empty() {
             return;
@@ -381,43 +387,17 @@ impl Overlay {
         ctx.set_text_align("start");
     }
 
-    /// Draw each collapsed folder's count beside its ring, knocked out of the background.
-    fn badges(&self, badges: &[Badge]) {
-        if badges.is_empty() {
-            return;
-        }
-        let st = self.style.borrow();
-        let ctx = &self.ctx;
-        ctx.set_font(&st.count.font);
-        ctx.set_text_align("start");
-        ctx.set_text_baseline("bottom");
-        ctx.set_line_join("round");
-        ctx.set_line_width(3.0);
-        ctx.set_stroke_style_str(&st.knockout);
-        ctx.set_fill_style_str(&st.count.ink);
-        for b in badges {
-            ctx.stroke_text(&b.text, b.x + 1.0, b.y).ok();
-            ctx.fill_text(&b.text, b.x + 1.0, b.y).ok();
-        }
-    }
-
-    /// Draw each label in its rect, in its kind's font and ink, knocked out of the background
-    /// and clipped to the rect; a name placed away from its glyph first gets its leader, a line
-    /// from the glyph to the nearest point of the rect.
+    /// Draw each label in its rect, in its kind's font (at its scale) and ink, knocked out of the
+    /// background and clipped to the rect; a label placed away from its point first gets its
+    /// leader, a line from the point to the nearest point of the rect (`Placed::leader_seg`).
     fn labels(&self, labels: &[Placed]) {
         if labels.is_empty() {
             return;
         }
         let st = self.style.borrow();
         let ctx = &self.ctx;
-        let leaders: Vec<([f64; 2], [f64; 2])> = labels
-            .iter()
-            .filter_map(|p| {
-                let [x, y] = p.leader?;
-                let near = [x.clamp(p.x, p.x + p.w), y.clamp(p.y, p.y + p.h)];
-                Some(([x, y], near))
-            })
-            .collect();
+        let leaders: Vec<([f64; 2], [f64; 2])> =
+            labels.iter().filter_map(|p| p.leader_seg()).collect();
         if !leaders.is_empty() {
             dash(ctx, &[]);
             ctx.set_line_width(1.0);
@@ -434,12 +414,13 @@ impl Overlay {
         ctx.set_line_join("round");
         ctx.set_line_width(3.0);
         ctx.set_stroke_style_str(&st.knockout);
-        let mut font = "";
+        let mut font = String::new();
         for p in labels {
             let face = st.face(p.kind);
-            if face.font != font {
-                ctx.set_font(&face.font);
-                font = &face.font;
+            let f = scaled(&face.font, p.scale);
+            if f != font {
+                ctx.set_font(&f);
+                font = f;
             }
             ctx.set_fill_style_str(&face.ink);
             ctx.save();
@@ -461,13 +442,22 @@ thread_local! {
 }
 
 /// Write `#graph[data-labels]`, `[[x, y, w, h, kind, text], …]` in pane CSS px to 0.1, from the
-/// labels the overlay drew this frame, and `#graph[data-label-cands]`, how many cards could
-/// have been labelled before the cap.
+/// labels the overlay drew this frame (a label drawn with a leader adds it,
+/// `[x1, y1, x2, y2]` from its point to its rect; the counts go to `data-counts`), and
+/// `#graph[data-label-cands]`, how many cards could have been labelled before the cap.
 pub fn publish(cv: &Element, placed: &[Placed], cands: usize) {
     let r = |v: f64| (v * 10.0).round() / 10.0;
     let rows: Vec<serde_json::Value> = placed
         .iter()
-        .map(|p| serde_json::json!([r(p.x), r(p.y), r(p.w), r(p.h), p.kind.name(), p.text]))
+        .filter(|p| p.kind != Kind::Count)
+        .map(|p| {
+            let mut row =
+                serde_json::json!([r(p.x), r(p.y), r(p.w), r(p.h), p.kind.name(), p.text]);
+            if let (Some((a, b)), Some(v)) = (p.leader_seg(), row.as_array_mut()) {
+                v.push(serde_json::json!([r(a[0]), r(a[1]), r(b[0]), r(b[1])]));
+            }
+            row
+        })
         .collect();
     let s = serde_json::Value::Array(rows).to_string();
     LAST.with(|l| {

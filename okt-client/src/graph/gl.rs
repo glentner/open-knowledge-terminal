@@ -724,9 +724,13 @@ pub struct Drawn {
     /// the highest camera distance a frame of the last flight drew
     pub peak: f64,
     /// JSON: the cards drawn with an uncommitted-changes dot, and the collapsed folders drawn
-    /// with their file count (`[id, count]`)
+    /// with their file count (`[id, count, x, y, w, h]`, the count's rect as placed)
     pub dirty: String,
     pub counts: String,
+    /// JSON: the walk target's label as drawn, `[x, y, w, h, text, id]` (empty with none)
+    pub walk_label: String,
+    /// JSON: where each region's glyph was drawn, `{folder: [x, y]}` in pane CSS px
+    pub glyphs: String,
 }
 
 thread_local! {
@@ -766,7 +770,7 @@ pub fn publish(cv: &Element, d: &Drawn) {
             .collect::<Vec<_>>()
             .join(",")
     );
-    let vals: [(&'static str, String); 27] = [
+    let vals: [(&'static str, String); 29] = [
         ("data-scale", d.scale.to_string()),
         ("data-region", d.region.clone()),
         (
@@ -799,6 +803,8 @@ pub fn publish(cv: &Element, d: &Drawn) {
         ("data-peak", sig3(d.peak)),
         ("data-dirty", d.dirty.clone()),
         ("data-counts", d.counts.clone()),
+        ("data-walk-label", d.walk_label.clone()),
+        ("data-glyphs", d.glyphs.clone()),
         ("data-anim", if d.anim { "1" } else { "0" }.to_string()),
     ];
     HOOKS.with(|h| {

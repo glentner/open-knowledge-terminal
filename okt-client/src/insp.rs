@@ -530,27 +530,60 @@ pub fn walk_list(idx: &Idx, id: &str) -> Vec<(String, &'static str)> {
 /// How many chips a Connections group shows before its "+N more" button.
 const GROUP_CHIPS: usize = 40;
 
-/// Mark the inspector's card for the node the graph walk is on (none: unmark). A group shows its
-/// first `GROUP_CHIPS` chips, so a target past them has no chip in the page: its chip is shown
-/// anyway, at the end of its group's shown chips, and marked. That extra chip carries
-/// `data-walked` and goes again at the next mark, so the group is back to its usual length once
-/// the walk moves on or stops.
+/// Mark the inspector's row for the node the graph walk is on (none: unmark). Every walk target
+/// has one while the selection's overview is shown: a target with no chip in the page gets one,
+/// marked (`show_row`). That extra chip carries `data-walked` and goes again at the next mark, so
+/// the inspector is back to what it was once the walk moves on or stops.
 pub fn mark_chip(id: Option<&str>) {
     for c in dom::qa("#ibody .nchip.kb") {
         dom::remove_class(&c, "kb");
     }
-    for c in dom::qa("#ibody .nchip[data-walked]") {
+    for c in dom::qa("#ibody [data-walked]") {
         c.remove();
     }
     let Some(id) = id else { return };
     let chip = dom::qa("#ibody .nchip[data-go]")
         .into_iter()
         .find(|c| dom::data(c, "go").as_deref() == Some(id))
-        .or_else(|| show_past_cap(id));
+        .or_else(|| show_row(id));
     if let Some(c) = chip {
         dom::add_class(&c, "kb");
         dom::scroll_into_view_nearest(&c);
     }
+}
+
+/// Give `id`, a walk target of the selection with no chip in the page, a chip of its own, while
+/// the selection's overview is shown. A connection past its group's `GROUP_CHIPS` shown chips
+/// goes at the end of that group (`show_past_cap`); a target no group lists (a folder's own
+/// files, a link on a page with no Connections section) goes in a section of its own, headed as
+/// the walk names it (`walk_list`), before the Connections section.
+fn show_row(id: &str) -> Option<Element> {
+    let sel = state::sel()?;
+    let overview = format!("{sel}|overview|");
+    if !KEY.with(|k| k.borrow().starts_with(&overview)) {
+        return None;
+    }
+    show_past_cap(id).or_else(|| {
+        let idx = state::idx()?;
+        let label = walk_list(&idx, &sel).into_iter().find(|(x, _)| x == id)?.1;
+        let html = format!(
+            "<div class=\"sect\" data-walked><div class=\"sh\">{}</div><div class=\"conn\">{}</div></div>",
+            esc(label),
+            walked_chip(&idx, id, "")
+        );
+        match dom::qa("#ibody [data-conns]").into_iter().next() {
+            Some(conns) => conns.insert_adjacent_html("beforebegin", &html).ok()?,
+            None => dom::id("ibody")
+                .insert_adjacent_html("beforeend", &html)
+                .ok()?,
+        }
+        dom::qa("#ibody .sect[data-walked] .nchip[data-go]").into_iter().next()
+    })
+}
+
+/// A chip shown only while the walk is on it.
+fn walked_chip(idx: &Idx, id: &str, small: &str) -> String {
+    nchip(idx, id, small).replacen("<button class=\"nchip\"", "<button class=\"nchip\" data-walked", 1)
 }
 
 /// Put the chip of `id`, a connection of the selection past its group's shown chips, into that
@@ -568,7 +601,7 @@ fn show_past_cap(id: &str) -> Option<Element> {
         .into_iter()
         .find(|e| dom::data(e, "conns").as_deref() == Some(sel.as_str()))?;
     let conn = dom::qa_in(&sect, ".cgroup .conn").into_iter().nth(gi)?;
-    let html = nchip(&idx, id, &small).replacen("<button class=\"nchip\"", "<button class=\"nchip\" data-walked", 1);
+    let html = walked_chip(&idx, id, &small);
     match dom::qa_in(&conn, "[data-more]").into_iter().next() {
         Some(more) => {
             more.insert_adjacent_html("beforebegin", &html).ok()?;
