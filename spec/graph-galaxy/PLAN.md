@@ -294,6 +294,9 @@ In show-all, nothing is hidden and every edge draws.
 - **Inspector mark:** `insp::mark_chip(Some(target))` is unchanged; it marks by id. `insp::render()`
   re-applies the mark from `graph::walk_target()`. A target beyond the 40-chip cap gets no mark; this
   is pre-existing and recorded as `issues/walk-mark-chip-cap.md` (§ 5).
+  - *2026-11-08, review cycle 1 (M2):* a target past the cap gets its chip shown at the end of its
+    group and marked; that chip goes again at the next mark, so the group is back to its usual
+    length once the walk moves on or stops. The seed and its ROADMAP entry are retired.
 - **`z` (`keys.rs:517`):** capture `s().view == "list"` and clone `S.list` **before** switching the
   view, then drop the borrow.
   - Results active: the focus set is the FIND files and names, or the Paths items, and the camera
@@ -559,6 +562,7 @@ One fresh reviewer ran on the GOAL, this design and the drafted gates, with the 
 - **Seeds this cycle writes,** each `unshaped`, with a `ROADMAP.md` entry, in the phase named:
   - `issues/walk-mark-chip-cap.md`: the inspector caps chips at 40 per group, so a walk target past
     the cap gets no mark. Pre-existing. Written in P6.
+    - *2026-11-08:* fixed in review cycle 1 (M2); the seed and its ROADMAP entry are retired.
   - `issues/graph-zoom-to-cursor.md`: zoom about the cursor (D3). Written in P2.
   - `issues/perf-profile-points.md`: `profile.mjs`'s legacy mode throws on an empty `points.json`
     and defaults to 6580. Pre-existing, out of scope. Written in P7.

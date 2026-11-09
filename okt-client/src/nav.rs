@@ -61,6 +61,8 @@ pub fn select(id: Option<&str>, opts: SelOpts) {
     // shows, cut while it is hidden
     graph::update_with(if opts.warp {
         graph::Arrive::Warp
+    } else if opts.from == "list" {
+        graph::Arrive::Results
     } else {
         graph::Arrive::Solve
     });

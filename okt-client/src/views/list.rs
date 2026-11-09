@@ -148,7 +148,9 @@ pub fn wire() {
                 _ => None,
             };
         }
-        if state::sel().as_deref() == Some(&id) && ln.is_none() {
+        // the selected card again changes nothing, unless the graph frames the matches: picking
+        // any card from the list ends that frame
+        if state::sel().as_deref() == Some(&id) && ln.is_none() && !crate::graph::framed() {
             return;
         }
         let has = ln.is_some();

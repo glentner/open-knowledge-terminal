@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feat/graph-galaxy
 base: main
-current_phase: P6
+current_phase: P7
 last_updated: '2026-11-08'
 phases:
 - id: P1
@@ -70,7 +70,7 @@ phases:
   verify: sh spec/graph-galaxy/verify/gate.sh P5
 - id: P6
   name: z framing and the angular walk with portals
-  status: in_progress
+  status: done
   satisfies:
   - R4
   - R5
@@ -649,9 +649,9 @@ carry the target's path.
   - `README.md` § Keys and the `?` list: j/k step clockwise in screen order, replacing "in the order
     the inspector lists them"; `z` frames the selection and its links, or the Results matches.
   - Doc comments at `keys.rs:400`, the `graph.rs` walk and `insp.rs:484`.
-- [x] Seed `issues/walk-mark-chip-cap.md` (`unshaped`) and its `ROADMAP.md` entry. The inspector caps
-      chips at 40 per group, so a walk target past the cap gets no mark. This is pre-existing and not
-      fixed in this cycle.
+- [x] The chip-cap seed and its `ROADMAP.md` entry: the inspector caps chips at 40 per group, so a
+      walk target past the cap got no mark. Filed here as pre-existing; review cycle 1 (M2) fixed it
+      in this cycle and retired both (corrected in place).
 - [x] `tests/ui/keys.mjs`: the P6 rows.
 - *Amended in build (2026-11-08):*
   - **`z`:** the Results branch calls `graph::frame_set(ids)`; the selection branch keeps the name
@@ -690,10 +690,30 @@ carry the target's path.
   - **`keys.mjs`:** the env.sh hub (`contact/index.md`) has 138 chips in one Connections group, so
     an angular walk can start past the chip cap. The existing GRAPH walk checks and the P2
     ArrowDown row now walk from `walker`, the most connected card whose every group fits 40 chips.
-    The P6 clockwise row walks the hub, and at a target past the cap asserts that no chip is
-    marked (the seed's defect), and that targets with a chip have theirs marked. The `z` re-solve
+    The P6 clockwise row walks the hub and, since review cycle 1, asserts a marked chip at every
+    step, past the cap included. The `z` re-solve
     row uses the most connected card whose set has λ₁/λ₀ ≥ 1.25, as the P4 axis row does: the hub's
     set is degenerate (1.095), and a degenerate solve can land near the orbited view.
+- *Amended in review-cycle-1 remediation (2026-11-08):*
+  - **M2:** the walk's target is marked at every step. `insp::mark_chip` finds the target's chip,
+    or, when it is past its group's `GROUP_CHIPS` (40) shown chips, shows it at the end of that
+    group (before "+N more") and marks it (`show_past_cap`, the group found through
+    `conn_groups`, which `connections()` now renders from, and the section's `data-conns`). The
+    extra chip carries `data-walked` and goes at the next mark, so the group is back to its
+    length once the walk moves on or stops. The clockwise row walks the hub (147 targets, 96 past
+    the cap) and asserts exactly the target's chip marked at every step, a `data-walked` chip
+    exactly when the target is past the cap, and at least one such step; the mark and re-render
+    rows now run on a target past the cap, and esc leaves no mark and no extra chip.
+    The chip-cap seed and its ROADMAP entry are retired (Part II renumbered: the perf profile is
+    now 7); the static row "chip-cap seed is filed" becomes "chip-cap seed is retired".
+    `verify/ledger.sh` takes the words "not deferred" out of a unit before it matches
+    (REVIEW.md's triage says "R5 is fixed, not deferred" beside the retired seed's path).
+  - **M4:** any selection from Results, the current card included, ends the match frame.
+    `nav::select` passes `Arrive::Results` for `from: "list"`, and `update_with` treats it as a
+    moved selection while a frame is up (the frame ends and the camera solves for the card);
+    the Results click handler no longer ignores a click on the selected card while
+    `graph::framed()`. New row "re-selecting the current card from Results ends the match frame".
+  - Touches `okt-client/src/nav.rs` and `okt-client/src/views/list.rs` beyond the list.
 - **Verify:** `sh spec/graph-galaxy/verify/gate.sh P6`.
 - **Touches:** `okt-client/src/keys.rs`, `okt-client/src/graph.rs`, `okt-client/src/graph/vis.rs`,
   `okt-client/src/insp.rs`, `okt-client/src/chrome.rs`, `README.md`, `okt-client/static/app.css`,

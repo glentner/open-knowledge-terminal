@@ -527,25 +527,64 @@ pub fn walk_list(idx: &Idx, id: &str) -> Vec<(String, &'static str)> {
     out
 }
 
-/// Mark the inspector's card for the node the graph walk is on (none: unmark). Only the chips
-/// shown are marked: a group shows its first 40, so a target past them gets no mark.
+/// How many chips a Connections group shows before its "+N more" button.
+const GROUP_CHIPS: usize = 40;
+
+/// Mark the inspector's card for the node the graph walk is on (none: unmark). A group shows its
+/// first `GROUP_CHIPS` chips, so a target past them has no chip in the page: its chip is shown
+/// anyway, at the end of its group's shown chips, and marked. That extra chip carries
+/// `data-walked` and goes again at the next mark, so the group is back to its usual length once
+/// the walk moves on or stops.
 pub fn mark_chip(id: Option<&str>) {
     for c in dom::qa("#ibody .nchip.kb") {
         dom::remove_class(&c, "kb");
     }
+    for c in dom::qa("#ibody .nchip[data-walked]") {
+        c.remove();
+    }
     let Some(id) = id else { return };
-    for c in dom::qa("#ibody .nchip[data-go]") {
-        if dom::data(&c, "go").as_deref() == Some(id) {
-            dom::add_class(&c, "kb");
-            dom::scroll_into_view_nearest(&c);
-            break;
+    let chip = dom::qa("#ibody .nchip[data-go]")
+        .into_iter()
+        .find(|c| dom::data(c, "go").as_deref() == Some(id))
+        .or_else(|| show_past_cap(id));
+    if let Some(c) = chip {
+        dom::add_class(&c, "kb");
+        dom::scroll_into_view_nearest(&c);
+    }
+}
+
+/// Put the chip of `id`, a connection of the selection past its group's shown chips, into that
+/// group (the first group holding it, as `walk_list` counts it), before the "+N more" button.
+fn show_past_cap(id: &str) -> Option<Element> {
+    let idx = state::idx()?;
+    let sel = state::sel()?;
+    let (gi, small) = conn_groups(&idx, &sel)
+        .into_iter()
+        .enumerate()
+        .find_map(|(gi, (_, items))| {
+            items.into_iter().find(|(x, _)| x == id).map(|(_, sm)| (gi, sm))
+        })?;
+    let sect = dom::qa("#ibody [data-conns]")
+        .into_iter()
+        .find(|e| dom::data(e, "conns").as_deref() == Some(sel.as_str()))?;
+    let conn = dom::qa_in(&sect, ".cgroup .conn").into_iter().nth(gi)?;
+    let html = nchip(&idx, id, &small).replacen("<button class=\"nchip\"", "<button class=\"nchip\" data-walked", 1);
+    match dom::qa_in(&conn, "[data-more]").into_iter().next() {
+        Some(more) => {
+            more.insert_adjacent_html("beforebegin", &html).ok()?;
+            more.previous_element_sibling()
+        }
+        None => {
+            conn.insert_adjacent_html("beforeend", &html).ok()?;
+            conn.last_element_child()
         }
     }
 }
 
-/// `connections(id)`
-fn connections(idx: &Idx, id: &str) -> String {
-    let mut groups: Vec<(&str, Vec<(String, String)>)> = Vec::new();
+/// The selection's Connections groups, in the order the inspector shows them: outgoing edges by
+/// kind, then incoming, each `(label, [(other end, small text)])`.
+fn conn_groups(idx: &Idx, id: &str) -> Vec<(&'static str, Vec<(String, String)>)> {
+    let mut groups: Vec<(&'static str, Vec<(String, String)>)> = Vec::new();
     let small = |e: &crate::model::Edge| {
         if e.k == "surface" || e.k == "field" {
             e.label.clone()
@@ -579,21 +618,28 @@ fn connections(idx: &Idx, id: &str) -> String {
             groups.push((edge_label(k, false), items));
         }
     }
+    groups
+}
+
+/// `connections(id)`
+fn connections(idx: &Idx, id: &str) -> String {
+    let groups = conn_groups(idx, id);
     if groups.is_empty() {
         return "<div class=\"sect\"><div class=\"sh\">Connections</div><div style=\"color:var(--dim)\">No links in or out.</div></div>".into();
     }
     let total = idx.out_of(id).len() + idx.in_of(id).len();
     let mut html = format!(
-        "<div class=\"sect\"><div class=\"sh\">Connections <span class=\"c\">{total}</span></div>"
+        "<div class=\"sect\" data-conns=\"{}\"><div class=\"sh\">Connections <span class=\"c\">{total}</span></div>",
+        esc(id)
     );
     for (label, items) in groups {
-        let more = items.len() as i64 - 40;
+        let more = items.len() as i64 - GROUP_CHIPS as i64;
         html.push_str(&format!(
             "<div class=\"cgroup\"><div class=\"cgl\">{} · {}</div><div class=\"conn\">",
             esc(label),
             items.len()
         ));
-        for (x, sm) in items.iter().take(40) {
+        for (x, sm) in items.iter().take(GROUP_CHIPS) {
             html.push_str(&nchip(idx, x, sm));
         }
         if more > 0 {

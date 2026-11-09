@@ -1628,6 +1628,9 @@ pub enum Arrive {
     Solve,
     /// flown there (Enter or space on a walk's target)
     Warp,
+    /// picked from the Results list: as `Solve`, and it ends a results frame (`z` in Results)
+    /// even when the card picked is the selection already, which then becomes the focus again
+    Results,
     /// back or forward through history: eased to the camera the entry recorded (a
     /// `pose_state()` value), or, when it recorded none, as `Solve`
     At(JsValue),
@@ -1638,6 +1641,11 @@ pub enum Arrive {
 /// region at system scale, no selection the galaxy), then new instances and the hint.
 pub fn update() {
     update_with(Arrive::Solve);
+}
+
+/// Whether `z` in Results framed the matches, and no selection has ended that frame yet.
+pub fn framed() -> bool {
+    g().matches.is_some()
 }
 
 /// `update()`, with a new selection arriving as `how` says.
@@ -1655,7 +1663,8 @@ pub fn update_with(how: Arrive) {
         }
         gs.sel = sel.as_deref().and_then(|s| gs.at.get(s).copied());
         gs.kids = kids.iter().filter_map(|k| gs.at.get(k).copied()).collect();
-        let moved = gs.sel_id != sel;
+        let refocus = matches!(how, Arrive::Results) && gs.matches.is_some();
+        let moved = gs.sel_id != sel || refocus;
         gs.sel_id = sel.clone();
         if moved {
             // a selection, from Results or anywhere, is the focus again

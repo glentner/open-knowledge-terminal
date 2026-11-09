@@ -109,7 +109,8 @@ if runs 6; then
   want "README drops the inspector order" "lacks README.md 'in the order the inspector lists them'"
   want "README says clockwise" "has README.md clockwise"
   want "? list says clockwise" "has okt-client/src/chrome.rs clockwise"
-  want "chip-cap seed is filed" "issue walk-mark-chip-cap"
+  # the inspector marks a walk target past the chip cap (review cycle 1), so its seed is retired
+  want "chip-cap seed is retired" "! staged issues/walk-mark-chip-cap.md && lacks ROADMAP.md 'walk-mark-chip-cap'"
 fi
 
 # ---- P7: warp, gate, ledger -------------------------------------------------------------------

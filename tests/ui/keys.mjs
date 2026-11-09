@@ -51,8 +51,9 @@ const degree = {};
 for (const e of idx.edges) { const [s, t] = Array.isArray(e) ? e : [e.s, e.t]; degree[s] = (degree[s] || 0) + 1; degree[t] = (degree[t] || 0) + 1; }
 const hub = files.filter(n => n.id.endsWith('.md')).sort((a, b) => (degree[b.id] || 0) - (degree[a.id] || 0))[0].id;
 const word = hub.split('/').pop().replace(/\.md$/, '').split(/[_-]/)[0];
-// the most connected markdown file whose every Connections group fits the inspector's 40 chips, so
-// each step of a walk from it has a chip to mark (issues/walk-mark-chip-cap.md)
+// the most connected markdown file whose every Connections group fits the inspector's 40 chips:
+// the GRAPH walk, flight and interleaving checks start from it, so their steps stay small (the
+// WALK checks walk the hub, past the cap)
 const groups = {};
 for (const e of idx.edges) {
   const [s, t, k] = Array.isArray(e) ? e : [e.s, e.t, e.k];
@@ -963,8 +964,9 @@ const showAll = async on => {
 // view: a card at its point; a portal (a link into another top-level folder) whose card is off the
 // pane at its region's glyph on the rim, and a card behind the camera at the rim in its own
 // direction, the rim lying in the view-plane direction from the pane centre (where the selection
-// is). The inspector marks the target's chip; it shows 40 chips per group, so a target past them
-// has none to mark (issues/walk-mark-chip-cap.md) and then no chip may be marked.
+// is). The inspector marks the target's chip at every step. It shows 40 chips per group, so a
+// target past them gets its chip shown at the end of its group (data-walked) for as long as the
+// walk is on it.
 const clipOf = (m, p) => [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12], m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13], m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15]];
 const clockAngle = v => { const a = Math.atan2(v[0], -v[1]); return a < 0 ? a + 2 * Math.PI : a; };
 const sameAt = (a, b) => { const ks = Object.keys(a || {}); return ks.length > 0 && ks.length === Object.keys(b || {}).length && ks.every(id => (b[id] || []).length === 3 && a[id].every((c, i) => Object.is(c, b[id][i]))); };
@@ -1015,7 +1017,8 @@ const sameAt = (a, b) => { const ks = Object.keys(a || {}); return ks.length > 0
   const shown = new Set(await page.evaluate(() => [...document.querySelectorAll('#ibody .nchip[data-go]')].map(c => c.dataset.go)));
   const walkState = () => page.evaluate(() => {
     const g = document.getElementById('graph');
-    return { walk: g.getAttribute('data-walk'), i: +g.getAttribute('data-walk-i'), n: +g.getAttribute('data-walk-n'), chip: document.querySelector('#ibody .nchip.kb')?.dataset.go ?? null };
+    const kb = [...document.querySelectorAll('#ibody .nchip.kb')];
+    return { walk: g.getAttribute('data-walk'), i: +g.getAttribute('data-walk-i'), n: +g.getAttribute('data-walk-n'), chip: kb[0]?.dataset.go ?? null, kbs: kb.length, extra: [...document.querySelectorAll('#ibody .nchip[data-walked]')].map(c => c.dataset.go) };
   });
   await key('j', 150);
   const m = (await state()).hint.match(/^1\/(\d+) · /);
@@ -1038,15 +1041,18 @@ const sameAt = (a, b) => { const ks = Object.keys(a || {}); return ks.length > 0
   // one glyph) are not descents
   const descents = angles.filter((a, k) => a < angles[k === 0 ? N - 1 : k - 1] - 1e-3).length;
   const once = new Set(ids).size === N && ids.every(Boolean) && steps.every((v, k) => v.i === k + 1 && v.n === N);
-  const marks = steps.filter(v => (shown.has(v.walk) ? v.chip !== v.walk : v.chip !== null));
+  // every step marks exactly the target's chip; a target past its group's shown chips adds its own
+  // chip, and only while the walk is on it
+  const marks = steps.filter(v => v.kbs !== 1 || v.chip !== v.walk || JSON.stringify(v.extra) !== JSON.stringify(shown.has(v.walk) ? [] : [v.walk]));
+  const past = steps.filter(v => !shown.has(v.walk)).length;
   check('j steps clockwise in screen order',
-    N >= 3 && once && angles.every(Number.isFinite) && descents === 1 && marks.length === 0 && steps.some(v => v.chip === v.walk),
-    { N, once, descents, firstAngles: angles.slice(0, 8).map(a => +(a * 180 / Math.PI).toFixed(1)), marks: marks.slice(0, 3), marked: steps.filter(v => v.chip === v.walk).length });
+    N >= 3 && once && angles.every(Number.isFinite) && descents === 1 && marks.length === 0 && past >= 1,
+    { N, once, descents, firstAngles: angles.slice(0, 8).map(a => +(a * 180 / Math.PI).toFixed(1)), marks: marks.slice(0, 3), past, shown: shown.size });
   check('a target in another region shows as a portal',
     !!portal && portal.labels.some(l => String(l[5]).includes(portal.target)) && portal.rim >= 1,
     portal || { error: 'no walk target in another region', N });
-  // back to a target whose chip the inspector shows
-  for (let k = 0; k < N && !shown.has((await walkState()).walk); k++) {
+  // back to a target past the chip cap
+  for (let k = 0; k < N && shown.has((await walkState()).walk); k++) {
     const i0 = (await walkState()).i;
     await page.keyboard.press('k');
     await page.waitForFunction(i => document.getElementById('graph').getAttribute('data-walk-i') !== String(i), i0, { timeout: 3000 }).catch(() => {});
@@ -1055,8 +1061,8 @@ const sameAt = (a, b) => { const ks = Object.keys(a || {}); return ks.length > 0
   const w1 = await walkState();
   const kb1 = await page.evaluate(() => [...document.querySelectorAll('#ibody .nchip.kb[data-go]')].map(c => c.dataset.go));
   check('the inspector marks the walk target',
-    !!w1.walk && kb1.length === 1 && kb1[0] === w1.walk,
-    { walk: w1.walk, marked: kb1 });
+    !!w1.walk && !shown.has(w1.walk) && kb1.length === 1 && kb1[0] === w1.walk && w1.extra.length === 1,
+    { walk: w1.walk, past: !shown.has(w1.walk), marked: kb1, extra: w1.extra });
   await key('c', 800);
   await key('o', 300);
   await page.waitForFunction(() => !!document.querySelector('#ibody .nchip[data-go]'), null, { timeout: 5000 }).catch(() => {});
@@ -1064,10 +1070,11 @@ const sameAt = (a, b) => { const ks = Object.keys(a || {}); return ks.length > 0
   const w2 = await walkState();
   const kb2 = await page.evaluate(() => [...document.querySelectorAll('#ibody .nchip.kb[data-go]')].map(c => c.dataset.go));
   const tab = (await state()).sel === hub;
-  check('the walk mark survives an inspector render',
-    tab && w2.walk === w1.walk && kb2.length === 1 && kb2[0] === w2.walk,
-    { walk: w2.walk, before: w1.walk, marked: kb2 });
   await key('Escape');
+  const w3 = await walkState();
+  check('the walk mark survives an inspector render',
+    tab && w2.walk === w1.walk && kb2.length === 1 && kb2[0] === w2.walk && w3.kbs === 0 && w3.extra.length === 0,
+    { walk: w2.walk, before: w1.walk, marked: kb2, afterEsc: { marked: w3.kbs, extra: w3.extra } });
 }
 {
   // FIND a word with matches in at least two regions, then z in Results
@@ -1101,6 +1108,30 @@ const sameAt = (a, b) => { const ks = Object.keys(a || {}); return ks.length > 0
     check('z frames the Results matches',
       view === 'list' && now === 'graph' && f.scale === 'focus' && f.n === pick.ms.length && pts.every(Boolean) && inside && extent >= 0.6 && extent <= 0.8,
       { word: pick.w, matches: pick.ms.length, regions: pick.regions, from: view, to: now, scale: f.scale, focusN: f.n, inside, extent: +extent.toFixed(3) });
+    // the current card picked again from Results ends the frame: its own focus set (it and its
+    // direct links, from idx) is drawn, not the matches
+    const ownN = id => [...tiersOf(id).hop].filter(([m, h]) => h <= 1 && kind[m] !== 'root').length;
+    const x = pick.ms.find(id => kind[id] === 'file' && ownN(id) !== pick.ms.length);
+    const results = () => page.locator('.fk[data-view=list]').click();
+    const row = () => page.locator(`#list [data-id="${x}"]:not([data-ln])`).first().click();
+    let framed = null, again = null;
+    if (x) {
+      await results();
+      await waits(row);
+      await page.waitForTimeout(300);
+      await results();
+      await waits(() => page.keyboard.press('z'));
+      framed = await focusState();
+      await results();
+      await page.waitForTimeout(200);
+      await row();
+      await page.waitForTimeout(300);
+      await waits(() => page.keyboard.press('g'));
+      again = await focusState();
+    }
+    check('re-selecting the current card from Results ends the match frame',
+      !!x && framed.n === pick.ms.length && (await state()).sel === x && again.focus === x && again.n === ownN(x) && again.n !== pick.ms.length,
+      { card: x, matches: pick.ms.length, own: x && ownN(x), framed: framed && framed.n, after: again && { focus: again.focus, n: again.n, scale: again.scale } });
   }
 }
 

@@ -54,10 +54,11 @@ P5|show all at the galaxy labels region names only|nothing selected, show all on
 P5|labels stay capped and apart while orbiting|timeline over a 1 s drag orbit: every recorded data-labels value has at most 24 card-kind entries and disjoint rects
 P6|z re-solves the camera and keeps the layout|orbit 60 degrees, press z: waits; theta or psi moves by at least 5 degrees; data-layout, data-pos-hash and positions unchanged
 P6|z frames the Results matches|FIND a word with matches in at least two regions, press z in Results: waits; data-focus-n equals the match count; every match projects inside the pane, extent 0.6 to 0.8
-P6|j steps clockwise in screen order|walk the hub N times (N from #ghint): each target visited once; the angles the test computes by projecting positions around the hub increase with exactly one wrap; data-walk equals the marked chip at each step
+P6|re-selecting the current card from Results ends the match frame|after that check, X a match card whose own focus set differs in size from the match count: pick X from Results (its row with no line), press z in Results (data-focus-n equals the match count), open Results again and click X's row once more, then g: waits; the hash s= is X, data-focus is X and data-focus-n equals, from idx, X and its distinct direct links (the root excluded), not the match count
+P6|j steps clockwise in screen order|walk the hub N times (N from #ghint): each target visited once; the angles the test computes by projecting positions around the hub increase with exactly one wrap; at every step exactly one chip is marked and it is data-walk, and #ibody holds a data-walked chip exactly when data-walk is past its group's 40 shown chips (then that chip, alone); at least one step is past the cap
 P6|a target in another region shows as a portal|walk to a cross-region target: data-labels has a portal entry whose text holds the target path; data-rim at least 1
-P6|the inspector marks the walk target|#ibody .nchip.kb[data-go] equals data-walk
-P6|the walk mark survives an inspector render|switch the inspector tab away and back: the mark is still on data-walk
+P6|the inspector marks the walk target|on a hub walk target past its group's 40 shown chips: #ibody .nchip.kb[data-go] is exactly data-walk, with one data-walked chip
+P6|the walk mark survives an inspector render|on that target, switch the inspector tab away and back: the mark is still on data-walk, one chip marked; esc then leaves no chip marked and no data-walked chip
 P7|space flies to the walk target|j then space: the hash s= equals the prior data-walk; history.length +1; the timeline's move lasts 500 to 800 ms and its peak data-dist is at least twice both endpoints
 P7|Enter flies to the walk target|as space, with Enter
 P7|[ eases back to the previous focus|orbit 40 degrees, fly, press [: waits; the hash and data-focus are back; theta, psi, dist within 0.5 of their values before the flight; the timeline shows an eased move

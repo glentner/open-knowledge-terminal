@@ -9,7 +9,7 @@
 # (REVIEW.md's "Out of scope (recorded, not blocking)" heading is not a deferral) and never the
 # YAML frontmatter. A deviation-table row (a line starting "| D<n> |") records an accepted reading,
 # not deferred work, and the checklist item naming the "deferral ledger" describes this check;
-# both are skipped and nothing else is.
+# both are skipped and nothing else is. The words "not deferred" are not a deferral.
 # Footprint: one awk/grep at a time, < 1 s.
 set -u
 root=$(git rev-parse --show-toplevel) || exit 2
@@ -32,6 +32,11 @@ for f in spec/graph-galaxy/TECH.md spec/graph-galaxy/PLAN.md spec/graph-galaxy/R
   | grep -Ei 'defer|follow-up|follow up|known limitation|do not fix here|not fixed (here|in this)|later cycle|next cycle|future work|left for later|out of scope' \
   | grep -v ': | D[0-9]* |' | grep -v 'deferral ledger' \
   | while IFS= read -r line; do
+      # "not deferred" says the opposite (REVIEW.md's triage: "R5 is fixed, not deferred"): a
+      # unit counts only when a deferral phrase is left once those words are taken out
+      printf '%s\n' "$line" | sed -E 's/not deferred//g' \
+        | grep -Eqi 'defer|follow-up|follow up|known limitation|do not fix here|not fixed (here|in this)|later cycle|next cycle|future work|left for later|out of scope' \
+        || continue
       seeds=$(printf '%s\n' "$line" | grep -Eo 'issues/[a-z0-9-]+\.md' | sort -u)
       if [ -z "$seeds" ]; then echo "FAIL ledger: deferral names no issues/ seed: $line"; echo x; continue; fi
       for s in $seeds; do
