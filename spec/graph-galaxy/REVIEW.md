@@ -125,3 +125,80 @@ All seven are CONFIRMED and route to `code okt build` (remediation); no PLAUSIBL
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run.
+
+## Review cycle 2 — changes-requested (2026-11-08)
+
+- **Reviewed commit:** 6ba9484a0e8b102a83a28c69138b28205a0b0a02. **Mode:** a fresh, full blind pass over the
+  whole spec-excluded diff, one reviewer (xhigh), with the same inputs as cycle 1. Evidence:
+  `.local/review2/`.
+- **Verification run:**
+  - `cargo test …`: okt-client 55, pygments 9, server 13 (1 ignored).
+  - `keys.mjs` in env.sh: 87/87.
+  - Headed `profile.mjs --graph` (ANGLE Metal, M4 Max, 6.9 ms refresh): orbit p95 8.2 ms,
+    orbit_all p95 8.1 ms, warp p95 8.2 ms (the warp's max interval was 152.8 ms; the contract
+    gates p95).
+  - Negative control: ignoring the inspector-click flag fails keys.mjs. Source and dist were
+    restored, and the hashes match.
+- **Cycle-1 findings:** all seven verified fixed. § Invariants 1 is clean (a burst of `[`/`]`/Enter
+  warps raised no borrow panic), and the `state.rs` change is correct.
+
+| R | Status |
+|---|---|
+| R1, R3, R4, R6, R7, R8, R10, R11, R12 | ✅ |
+| R2 | ✅ names; leaders, see F2 |
+| R5 | ❌ F3, F4, F5 |
+| R9 | ❌ F1, F2 |
+
+### [MEDIUM/CONFIRMED] F1 · Count badges overlap each other (R9)
+- **Where:** `graph.rs:2282,2404`; `overlay.rs:385`. Badges are obstacles for labels, but never
+  for each other.
+- **Evidence:** probe3, at 820×900 with `workspace/`: two sibling "44" badges at (325,222) and
+  (331,226) render as one smudge (`p3-badges-mag.png`).
+
+### [MEDIUM/CONFIRMED] F2 · Region-name leader lines cross other labels (R9)
+- **Where:** `labels.rs:250,260-263`; `overlay.rs:413`. `free` tests the rect, never the leader
+  segment.
+- **Evidence:** probe4: 22 of 41 leaders cross a label at 1600×1000, and 65 of 85 at 1100×700.
+  Screenshots `p5-agent-left.png` and `p5-cv-bottom.png`.
+
+### [MEDIUM/CONFIRMED] F3 · Some portal walk targets get no label at rest (R5)
+- **Where:** `graph.rs:2567,2810`; `labels.rs:260`. A full-path portal label with no free side is
+  dropped, and the re-fit ignores pane chrome.
+- **Evidence:** probe7: 4 of 174 portal steps are unlabelled. Example: `skill/code-foreman.md`,
+  steps 5 and 6, where the card sits under the legend.
+
+### [MEDIUM/CONFIRMED] F4 · Walk order drifts from on-screen angular order after the walk's own re-fit (R5)
+- **Where:** `graph.rs:2839-2848`.
+- **Evidence:** probe7 and probe2: every counter-clockwise backstep follows a distance change.
+  Examples: `memory/inbox.md` has 15 backsteps after re-fits at steps 36 and 47; walks without a
+  re-fit have 0.
+
+### [MEDIUM/CONFIRMED] F5 · Folder walks leave the folder's own files unmarked in the inspector (R5)
+- **Where:** `insp.rs:508,538,558`. A folder's walk includes "In this folder" files, but the
+  folder inspector has no row for them.
+- **Evidence:** probe1: `skill/` leaves 44 of 54 steps unmarked; `workspace/` 1 of 31;
+  `memory/` 1 of 16. Not a regression from main.
+
+### Triage (foreman, 2026-11-08, under decision 2026-11-08-okt-dream-inbox-autonomous)
+
+**Convergence:**
+- Cycle 1 had one HIGH, five MEDIUM and two LOW, and all are fixed. Cycle 2 has five MEDIUM, all
+  in R5 and R9's overlay and walk polish. F1 and F2 are side effects of the cycle-1 fixes for L2
+  and M3.
+- The foreman judges this converging, and routes one last remediation. A CONFIRMED finding in
+  review cycle 3 stops the cycle for Geoffrey.
+
+**Routing:**
+- **F1 + F2:** one property: every overlay element (card labels, region names, count badges and
+  leader segments) is mutually non-overlapping, and no leader crosses another element. Every rim
+  region stays named (R2), with the fallback order chosen by the build (more spots, smaller
+  type, middle-ellipsis). Count badges are placed, not only obstacles: a badge with no free spot
+  is dropped, never stacked. The check grades badges and leaders as well as label rects.
+- **F3:** the walk target's label is always placed at rest. It is middle-ellipsized and uses the
+  leader fallback, and the re-fit counts pane chrome (legend, toolbar, hint, compass) as off-pane.
+- **F4:** at every step, `j`/`k` move to the next or previous target in clockwise order under the
+  pose the step will show. After a re-fit, the order is re-sorted from the current target. The
+  check walks across a re-fit.
+- **F5:** fixed under R5's "the two stay linked". The inspector shows and marks the row of every
+  walk target, a folder's own files included (the past-cap mechanism generalized). The check
+  walks `skill/`.
