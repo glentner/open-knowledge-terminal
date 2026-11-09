@@ -35,17 +35,23 @@ output.
 
 # Part II — Views
 
-The current run, in order. Each entry is one feature cycle.
+The current run, in order. Each entry is one feature cycle. Re-ordered 2026-11-08: the graph
+rebuild is on ice (below), and the two small cycles go first.
 
-### 2. The graph as a navigable 3D space
+### 2. Files columns by priority
 
-The radial graph draws everything at once, so it no longer helps anyone navigate. Rebuild it as
-galaxy, system and focus scales, with a camera that solves the viewing angle and visibility decided
-by graph distance from the focus.
+As the pane narrows, Name is crushed first. Keep Name whole up to a cap, and drop the other columns
+in a set order instead.
 
-**Seed:** [`issues/graph-galaxy.md`](issues/graph-galaxy.md)
+**Seed:** [`issues/files-column-priority.md`](issues/files-column-priority.md)
 
-### 3. Pane arrangements
+### 3. Compact History
+
+History rows are two lines tall. Make them one line under the Log's day rules.
+
+**Seed:** [`issues/history-log-rows.md`](issues/history-log-rows.md)
+
+### 4. Pane arrangements
 
 The view pane and the inspector are fixed left and right. Make panes placeable, swappable,
 stackable and collapsible, with saved arrangements, so a third view (the dream inbox, an agent chat)
@@ -53,18 +59,15 @@ has somewhere to go.
 
 **Seed:** [`issues/pane-arrangements.md`](issues/pane-arrangements.md)
 
-### 4. Files columns by priority
+### On ice: the graph as a navigable space
 
-As the pane narrows, Name is crushed first. Keep Name whole up to a cap, and drop the other columns
-in a set order instead.
+The radial graph draws everything at once, so it no longer helps anyone navigate. A first attempt
+(a free 3D camera over galaxy, system and focus scales) was archived as a failed experiment on
+2026-11-08: it lost the per-region glyphs and colours and read worse than the radial graph. The
+branch is kept as `archive/graph-galaxy`, with the lessons in its `spec/graph-galaxy/ARCHIVED.md`.
+A restart begins with concept art, with Geoffrey at every step.
 
-**Seed:** [`issues/files-column-priority.md`](issues/files-column-priority.md)
-
-### 5. Compact History
-
-History rows are two lines tall. Make them one line under the Log's day rules.
-
-**Seed:** [`issues/history-log-rows.md`](issues/history-log-rows.md)
+**Seed:** [`issues/graph-galaxy.md`](issues/graph-galaxy.md)
 
 ---
 

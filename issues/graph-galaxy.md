@@ -127,3 +127,9 @@ distance from the focus, and stop drawing most of the graph.
 - Related: `issues/pane-arrangements.md`. The graph will live in panes of any shape, so the camera
   fits its pane, not the window.
 - Found by: Geoffrey, chat 2026-11-08 (story 3, KB `workspace/open-knowledge-terminal/stories.md`).
+- **First attempt archived, 2026-11-08.** A free 3D camera over galaxy, system and focus scales,
+  built through two review cycles, was stopped by Geoffrey after a preview: it lost the per-region
+  glyphs and colours, read worse than the radial graph, and its proportions were off. Branch
+  `archive/graph-galaxy`; lessons and reusable parts in its `spec/graph-galaxy/ARCHIVED.md`. A
+  restart begins with concept art from the real index (galaxy, system, focus, a mid-warp frame) in
+  the first graph's glyphs and colours, and visual R-IDs graded against the approved frames.
