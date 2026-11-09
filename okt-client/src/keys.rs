@@ -397,9 +397,10 @@ fn on_key(e: KeyboardEvent) {
         }
         return;
     }
-    // Walk the graph from the keyboard (README § Keys). j and k step through
-    // the selection's connections; Enter or space goes to the one marked, or else opens or
-    // closes the selected folder (space, Enter) or shows a file's content (Enter).
+    // Walk the graph from the keyboard (README § Keys). j and k step through the selection's
+    // connections clockwise in screen order, around the selection from 12 o'clock; Enter or space
+    // goes to the one marked, or else opens or closes the selected folder (space, Enter) or shows
+    // a file's content (Enter).
     if view == "graph" {
         let walked = match k.as_str() {
             "j" | "ArrowDown" => {
@@ -535,11 +536,33 @@ fn on_key(e: KeyboardEvent) {
             b.scroll_by_with_scroll_to_options(&o);
             true
         }
+        // z frames in place, moving only the camera and pushing no history entry: with the
+        // Results view active, the list's matches across regions; otherwise the selection and
+        // its links (README § Keys)
         "z" => {
+            let matches: Option<Vec<String>> = {
+                let st = s();
+                (st.view == "list")
+                    .then(|| st.list.clone())
+                    .flatten()
+                    .map(|l| match &*l {
+                        ListData::Find { files, names, .. } => names
+                            .iter()
+                            .cloned()
+                            .chain(files.iter().map(|f| f.path.clone()))
+                            .collect(),
+                        ListData::Paths { items, .. } => {
+                            items.iter().map(|it| it.id.clone()).collect()
+                        }
+                    })
+            };
             if view != "graph" {
                 nav::set_view("graph", false);
             }
-            graph::frame_selection();
+            match matches {
+                Some(ids) => graph::frame_set(&ids),
+                None => graph::frame_selection(),
+            }
             true
         }
         "s" => {

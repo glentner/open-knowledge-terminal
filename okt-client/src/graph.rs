@@ -24,6 +24,12 @@
 //! while it moves; each frame only re-picks the side each label sits on, and hides one that fits
 //! nowhere, so nothing pops in mid-motion and nothing overlaps.
 //!
+//! `z` re-solves the camera without moving a card: for the selection and its links, as a
+//! selection is solved, or for a results list's matches where they are, across regions. `j`/`k`
+//! walk the selection's connections clockwise on screen, from 12 o'clock around the selection, in
+//! an order taken when the walk starts and kept while the camera holds still; a connection in
+//! another region is a portal, its edge out to that region's glyph on the rim.
+//!
 //! Frames are drawn on demand. Input handlers never draw: every camera move goes through
 //! `cam_to`, which starts an ease (or cuts, under reduced motion) and schedules a frame. The frame
 //! evaluates the pose, projects and sorts the drawn points, draws, and only then, with no graph
@@ -84,6 +90,8 @@ const BUNDLE_SEGS: usize = 12;
 const LABEL_REST_MS: f64 = 150.0;
 /// A portal label's path is cut in the middle to this many characters.
 const PORTAL_CHARS: usize = 34;
+/// A walk target closer than this to the pane's edge (CSS px) is re-fitted into view.
+const WALK_MARGIN: f64 = 40.0;
 
 // ---- collapse: which node stands for each id -------------------------------------------------
 
@@ -287,6 +295,8 @@ struct Colors {
     compass: (String, String),
     /// how far inside the pane's edge the rim runs, CSS px (`--graph-rim-inset`)
     rim_inset: f64,
+    /// the walk target's edge, CSS px wide (`--graph-walk-w`)
+    walk_w: f64,
     /// a dark background: halos add light rather than cover
     dark: bool,
 }
@@ -336,6 +346,7 @@ impl Colors {
             ),
             compass: (v("--graph-compass"), v("--graph-compass-far")),
             rim_inset: number("--graph-rim-inset", 34.0),
+            walk_w: number("--graph-walk-w", 3.0),
         }
     }
     fn fam(&self, f: &str) -> [f32; 4] {
@@ -514,8 +525,12 @@ pub struct G {
     moves: u64,
     picks: Vec<Pick>,
     hover: Option<usize>,
-    /// the node the keyboard walk is on (see `walk`)
+    /// the node the keyboard walk is on (see `walk`), and where it is in the walk (1-based, of n)
     cursor: Option<usize>,
+    walk_at: Option<(usize, usize)>,
+    /// a results list's matches, framed in place by `z` (`frame_set`): while set they, not the
+    /// selection, are the focus set the tiers start from
+    matches: Option<Vec<usize>>,
     flash: Vec<(usize, f64)>,
     w: f64,
     h: f64,
@@ -635,14 +650,22 @@ impl G {
     /// on), at the distance that fits them to the pane. Its links in other regions are left to
     /// their portals on the rim. Also the points fitted and their ids.
     fn card_view(&self, i: usize) -> (Pose, Vec<cam::V3>, Vec<String>) {
+        let links = self.vis.adj.get(i).cloned().unwrap_or_default();
+        self.solve_for(i, &links)
+    }
+    /// The camera for node `i` and its `members` (the connections the walk steps through): `i`
+    /// as the target, solved and fitted for `i` and the members in its region, as `card_view`.
+    fn solve_for(&self, i: usize, members: &[usize]) -> (Pose, Vec<cam::V3>, Vec<String>) {
         let r = self.vis.region.get(i).copied();
         let mut set = vec![i];
-        if let Some(adj) = self.vis.adj.get(i) {
-            set.extend(adj.iter().copied().filter(|&j| {
-                j != i
-                    && self.vis.region.get(j).copied() == r
-                    && self.nodes.get(j).is_some_and(|v| v.kind != Kind::Root)
-            }));
+        for &j in members {
+            if j != i
+                && !set.contains(&j)
+                && self.vis.region.get(j).copied() == r
+                && self.nodes.get(j).is_some_and(|v| v.kind != Kind::Root)
+            {
+                set.push(j);
+            }
         }
         let pts: Vec<cam::V3> = set.iter().map(|&j| self.space.pos[j]).collect();
         let ids = set.iter().map(|&j| self.ids[j].clone()).collect();
@@ -667,6 +690,62 @@ impl G {
         };
         (to, pts, ids)
     }
+    /// How far inside the pane's edges the rim runs: the token, and clear of the toolbar on the
+    /// left and the legend at the bottom.
+    fn rim_inset(&self) -> cam::Insets {
+        let base = self.colors.as_ref().map(|c| c.rim_inset).unwrap_or(34.0);
+        cam::Insets {
+            left: base.max(self.chrome.0 + 14.0),
+            top: base,
+            right: base,
+            bottom: base.max(self.chrome.1 + 14.0),
+        }
+    }
+    /// Where a walk target shows under `pose`, with the other regions' glyphs `w` of the way to
+    /// the rim: its point, and its rim point, which is its region's glyph for a portal (a link in
+    /// a region out of focus) whose card is off the pane, otherwise the rim in its own direction
+    /// (where a card behind the camera points).
+    fn walk_spot<'a>(
+        &self,
+        j: usize,
+        pose: &Pose,
+        pane: Pane,
+        w: f64,
+        path: &'a str,
+    ) -> vis::Target<'a> {
+        let p = self.space.pos[j];
+        let proj = cam::project(p, pose, pane).map(|q| [q[0], q[1]]);
+        let on =
+            proj.is_some_and(|q| q[0] >= 0.0 && q[1] >= 0.0 && q[0] <= pane.w && q[1] <= pane.h);
+        let inset = self.rim_inset();
+        let glyph = self
+            .portals
+            .iter()
+            .find(|x| x.to == j)
+            .filter(|_| !on)
+            .and_then(|x| self.space.regions.get(x.region))
+            .map(|g| {
+                let rp = cam::rim_point(g.core, pose, pane, inset);
+                match cam::project(g.core, pose, pane) {
+                    Some(q) => lerp2([q[0], q[1]], rp, w),
+                    None => rp,
+                }
+            });
+        vis::Target {
+            px: proj,
+            rim: glyph.unwrap_or_else(|| cam::rim_point(p, pose, pane, inset)),
+            portal: glyph.is_some(),
+            path,
+        }
+    }
+    /// The selection's point under `pose`, the centre the walk turns about (the pane centre when
+    /// it does not project).
+    fn walk_centre(&self, pose: &Pose, pane: Pane) -> [f64; 2] {
+        self.sel
+            .and_then(|i| cam::project(self.space.pos[i], pose, pane))
+            .map(|q| [q[0], q[1]])
+            .unwrap_or([pane.w / 2.0, pane.h / 2.0])
+    }
     /// Set the scale and the active region; true when either changed.
     fn set_scale(&mut self, scale: Scale, region: Option<usize>) -> bool {
         let changed = self.scale != scale || self.region != region;
@@ -688,7 +767,7 @@ thread_local! {
         inst_dirty: false, sel: None,
         pose: Pose { target: [0.0; 3], theta: THETA0, psi: PSI0, ln_d: 8.0 },
         anim: None, autofit: true, fit: Fit::Galaxy, moves: 0, picks: vec![], hover: None,
-        cursor: None, flash: vec![], w: 0.0, h: 0.0, dpr: 1.0, host_rect: (0.0, 0.0, 0.0, 0.0),
+        cursor: None, walk_at: None, matches: None, flash: vec![], w: 0.0, h: 0.0, dpr: 1.0, host_rect: (0.0, 0.0, 0.0, 0.0),
         chrome: (0.0, 0.0, 0.0), chrome_rects: vec![], hint_rect: None, texts: Rc::new(vec![]),
         lab: LabelSet::default(),
         raf: 0, drag: None, built: false,
@@ -791,9 +870,15 @@ pub fn build(flash: &[String]) {
     };
     {
         let mut gs = g();
-        // the active region keeps its folder across a rebuild, wherever its index moved
+        // the active region keeps its folder across a rebuild, wherever its index moved, and a
+        // results frame its matches
         let active = gs.region.and_then(|r| gs.vis.regions.get(r).cloned());
         gs.region = active.and_then(|k| vis.regions.iter().position(|x| *x == k));
+        let matched: Option<Vec<String>> = gs
+            .matches
+            .as_ref()
+            .map(|m| m.iter().filter_map(|&i| gs.ids.get(i).cloned()).collect());
+        gs.matches = matched.map(|m| m.iter().filter_map(|id| at.get(id).copied()).collect());
         gs.lay = lay;
         gs.space = sp.clone();
         gs.ids = Rc::new(ids);
@@ -980,15 +1065,20 @@ fn instances(gs: &G) -> Tiered {
         ));
     let n = gs.nodes.len();
     let sel = gs.sel;
-    let centre: Vec<usize> = sel.into_iter().collect();
-    let regions: Vec<usize> = sel
-        .and_then(|i| gs.vis.region.get(i).copied())
-        .into_iter()
+    let matches = gs.matches.as_deref();
+    let centre: Vec<usize> = match matches {
+        Some(m) => m.to_vec(),
+        None => sel.into_iter().collect(),
+    };
+    let mut regions: Vec<usize> = centre
+        .iter()
+        .filter_map(|&i| gs.vis.region.get(i).copied())
         .collect();
-    let kids: &[usize] = if sel.is_some_and(|i| gs.nodes[i].kind == Kind::Dir) {
-        &gs.kids
-    } else {
-        &[]
+    regions.sort_unstable();
+    regions.dedup();
+    let kids: &[usize] = match sel {
+        Some(i) if matches.is_none() && gs.nodes[i].kind == Kind::Dir => &gs.kids,
+        _ => &[],
     };
     let folder: Vec<bool> = gs
         .nodes
@@ -999,6 +1089,7 @@ fn instances(gs: &G) -> Tiered {
         centre: &centre,
         kids,
         regions: &regions,
+        links: matches.is_none(),
     };
     let tier = vis::tiers(&gs.vis, &focus, &folder, &gs.fold, gs.show_all);
     let active = if gs.scale == Scale::Galaxy {
@@ -1012,7 +1103,7 @@ fn instances(gs: &G) -> Tiered {
             let r = gs.vis.region.get(i).copied();
             k != Kind::Root
                 && (tier[i] != vis::HIDDEN
-                    || (sel.is_none() && k == Kind::Dir && r.is_some() && r == active))
+                    || (centre.is_empty() && k == Kind::Dir && r.is_some() && r == active))
         })
         .collect();
     let drawn: Vec<u32> = (0..n).filter(|&i| on[i]).map(|i| i as u32).collect();
@@ -1237,7 +1328,8 @@ pub fn fit() {
         let mut gs = g();
         gs.autofit = true;
         gs.fit = Fit::Galaxy;
-        let rescaled = gs.set_scale(Scale::Galaxy, None);
+        let unframed = gs.matches.take().is_some();
+        let rescaled = gs.set_scale(Scale::Galaxy, None) || unframed;
         let to = Pose {
             target: [0.0; 3],
             ln_d: gs.d_galaxy().ln(),
@@ -1485,6 +1577,10 @@ pub fn update() {
         gs.kids = kids.iter().filter_map(|k| gs.at.get(k).copied()).collect();
         let moved = gs.sel_id != sel;
         gs.sel_id = sel.clone();
+        if moved {
+            // a selection, from Results or anywhere, is the focus again
+            gs.matches = None;
+        }
         moved
     };
     if moved {
@@ -1665,12 +1761,7 @@ fn glyphs(gs: &G, pose: &Pose, pane: Pane, unit: f64) -> Glyphs {
     };
     let w = gs.rim;
     let ga = c.glyph_alpha as f64;
-    let inset = cam::Insets {
-        left: c.rim_inset.max(gs.chrome.0 + 14.0),
-        top: c.rim_inset,
-        right: c.rim_inset,
-        bottom: c.rim_inset.max(gs.chrome.1 + 14.0),
-    };
+    let inset = gs.rim_inset();
     let centre = [pane.w / 2.0, pane.h / 2.0];
     let regions = gs.space.regions.len().min(gs.vis.regions.len());
     // where each region's glyph landed, for the lines out to the rim
@@ -1951,6 +2042,39 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
             n_portals += 1;
         }
     }
+    // the walk: where its target shows (a portal off the pane at its region's glyph, a card
+    // behind the camera at the rim), its angle about the selection, and its edge drawn thicker
+    let walk = gs.cursor.map(|j| {
+        let mut spot = gs.walk_spot(j, &pose, pane, gs.rim, "");
+        if let Some(at) = gs
+            .portals
+            .iter()
+            .find(|p| p.to == j)
+            .filter(|_| spot.portal)
+            .and_then(|p| gly.at.get(p.region).copied().flatten())
+        {
+            spot.rim = at;
+        }
+        let centre = gs.walk_centre(&pose, pane);
+        let to = spot.at();
+        (j, centre, to, vis::screen_angle(centre, to).to_degrees())
+    });
+    if let (Some(c), Some((j, _, to, _)), Some(i)) = (gs.colors.as_ref(), walk, gs.sel) {
+        let linked = gs
+            .vis
+            .adj
+            .get(i)
+            .is_some_and(|a| a.binary_search(&j).is_ok());
+        if let (true, Some([fx, fy, _])) = (linked, cam::project(gs.space.pos[i], &pose, pane)) {
+            gly.under.push(gl::Mark {
+                a: [fx as f32, fy as f32],
+                b: [to[0] as f32, to[1] as f32],
+                r: (c.walk_w * 0.5) as f32,
+                style: gl::mark::DISC,
+                rgba: [c.accent[0], c.accent[1], c.accent[2], 0.95],
+            });
+        }
+    }
     let mut picks: Vec<Pick> = items
         .iter()
         .rev()
@@ -2113,6 +2237,9 @@ fn render(gs: &mut G, now: f64) -> Option<(gl::Drawn, Uploaded, (Vec<labels::Pla
         focus_ids: serde_json::to_string(&*gs.focus_ids).unwrap_or_default(),
         tiers,
         drawn_regions,
+        walk: walk.map(|(j, ..)| gs.ids[j].clone()).unwrap_or_default(),
+        walk_at: gs.walk_at.filter(|_| walk.is_some()).unwrap_or((0, 0)),
+        walk_angle: walk.map(|(.., a)| a),
     };
     Some((drawn, uploaded, labels))
 }
@@ -2168,8 +2295,13 @@ fn place_labels(
     let mut cands: Vec<labels::Cand> = Vec::new();
     let mut n_cands = 0;
     let mut focus_disc = None;
+    // a walk target behind the camera has no point; as a portal it is still named at its glyph
+    let behind = gs
+        .cursor
+        .filter(|&j| !items.iter().any(|it| it.1 as usize == j))
+        .map(|j| (f64::NAN, j as u32, f64::NAN, f64::NAN));
     if any_scale {
-        for &(s, i, x, y) in items {
+        for &(s, i, x, y) in items.iter().chain(behind.iter()) {
             let i = i as usize;
             let v = &gs.nodes[i];
             if Some(i) == gs.sel {
@@ -2190,13 +2322,17 @@ fn place_labels(
             if v.kind == Kind::Root || tier > 3 || (!gs.show_all && tier > 1) {
                 continue;
             }
-            n_cands += 1;
+            if !s.is_nan() {
+                n_cands += 1;
+            }
             let walk = Some(i) == gs.cursor;
             if !choose && !walk && !lab.set.contains(&i) {
                 continue;
             }
             let portal = gs.portals.iter().find(|p| p.to == i);
             let (kind, text) = match (portal, v.kind) {
+                // the walk's target names its whole path, so it can be told where the walk goes
+                (Some(_), _) if walk => (labels::Kind::Portal, gs.ids[i].as_str()),
                 (Some(_), _) => (labels::Kind::Portal, texts[i].1.as_str()),
                 _ if Some(i) == gs.sel => (labels::Kind::Focus, texts[i].0.as_str()),
                 (_, Kind::Dir) => (labels::Kind::Folder, texts[i].0.as_str()),
@@ -2313,8 +2449,11 @@ fn ease_out(t: f64) -> f64 {
 
 struct Walk {
     from: String,
+    /// the selection's connections (`insp::walk_list`), in walk order: clockwise on screen
     list: Vec<(String, &'static str)>,
     i: Option<usize>,
+    /// the destination pose the order was taken from: a move the walk did not make re-sorts it
+    pose: Pose,
 }
 
 thread_local! {
@@ -2331,9 +2470,40 @@ pub fn walk_target() -> Option<String> {
     })
 }
 
-/// j and k in the graph: step through the selection's connections in the order the inspector
-/// lists them (`insp::walk_list`), marking the one reached with a dashed ring and its card, and
-/// saying where the walk is in the hint. Enter or space goes there; esc stops.
+/// The walk's members in walk order: clockwise around the selection from 12 o'clock, as they
+/// show under `pose` (`vis::angular_order`): a card at its point, a portal whose card is off the
+/// pane at its region's glyph, a card behind the camera at the rim in its direction.
+fn walk_order(list: Vec<(String, &'static str)>, pose: &Pose) -> Vec<(String, &'static str)> {
+    let order = {
+        let gs = g();
+        let pane = gs.pane();
+        let w = rim_of(gs.scale);
+        let centre = gs.walk_centre(pose, pane);
+        let ts: Vec<vis::Target> = list
+            .iter()
+            .map(|(m, _)| match gs.at.get(m) {
+                Some(&j) => gs.walk_spot(j, pose, pane, w, m),
+                None => vis::Target {
+                    px: None,
+                    rim: centre,
+                    portal: false,
+                    path: m,
+                },
+            })
+            .collect();
+        vis::angular_order(centre, &ts)
+    };
+    order.into_iter().map(|k| list[k].clone()).collect()
+}
+
+/// j and k in the graph: step through the selection's connections (`insp::walk_list`) in
+/// on-screen angular order, clockwise around the selection from 12 o'clock like a clock hand.
+/// The order is taken from where the camera is going and kept for the walk; an orbit or a zoom
+/// re-sorts it and finds the target again by id. The target is marked with a dashed ring, a
+/// thicker edge and its inspector chip, and the hint says where the walk is; a link in another
+/// region is a portal, its edge out to that region's glyph on the rim labelled with its path.
+/// The camera holds still, but for a small re-fit when the target is off the pane and not at the
+/// rim. Enter or space goes there; esc stops.
 pub fn walk(step: i64) {
     let Some(idx) = state::idx() else { return };
     let Some(sel) = state::sel() else {
@@ -2344,16 +2514,37 @@ pub fn walk(step: i64) {
         );
         return;
     };
+    // a walk leaves a results frame: the selection's tiers (and its portals) come back first
+    if g().matches.take().is_some() {
+        retier();
+    }
+    let dest = g().dest();
+    let held = WALK.with(|w| {
+        w.borrow()
+            .as_ref()
+            .filter(|w| w.from == sel)
+            .map(|w| (w.pose, w.list.clone(), w.i.map(|i| w.list[i].0.clone())))
+    });
+    let resort = match held {
+        Some((pose, _, _)) if pose == dest => None,
+        Some((_, list, cur)) => Some((list, cur)),
+        None => Some((insp::walk_list(&idx, &sel), None)),
+    };
+    if let Some((list, cur)) = resort {
+        let list = walk_order(list, &dest);
+        let i = cur.and_then(|c| list.iter().position(|(m, _)| *m == c));
+        WALK.with(|w| {
+            *w.borrow_mut() = Some(Walk {
+                from: sel.clone(),
+                list,
+                i,
+                pose: dest,
+            })
+        });
+    }
     let got = WALK.with(|w| {
         let mut w = w.borrow_mut();
-        if w.as_ref().is_none_or(|w| w.from != sel) {
-            *w = Some(Walk {
-                from: sel.clone(),
-                list: insp::walk_list(&idx, &sel),
-                i: None,
-            });
-        }
-        let w = w.as_mut().unwrap();
+        let w = w.as_mut()?;
         let n = w.list.len() as i64;
         if n == 0 {
             return None;
@@ -2374,19 +2565,53 @@ pub fn walk(step: i64) {
         );
         return;
     };
-    let (place, d, w, h) = {
+    let refit = {
         let mut gs = g();
         gs.cursor = gs.at.get(&target).copied();
-        let place = gs
-            .cursor
-            .and_then(|i| cam::project(gs.space.pos[i], &gs.pose, gs.pane()));
-        (place, gs.dest().d(), gs.w, gs.h)
+        gs.walk_at = Some((at, of));
+        let pane = gs.pane();
+        let dest = gs.dest();
+        let w = rim_of(gs.scale);
+        gs.cursor.filter(|_| gs.w > 0.0).and_then(|j| {
+            let spot = gs.walk_spot(j, &dest, pane, w, "");
+            let shown = spot.portal
+                || spot.px.is_some_and(|p| {
+                    p[0] >= WALK_MARGIN
+                        && p[1] >= WALK_MARGIN
+                        && p[0] <= pane.w - WALK_MARGIN
+                        && p[1] <= pane.h - WALK_MARGIN
+                });
+            if shown {
+                return None;
+            }
+            // the same target and angles, just far enough out to take the target in too
+            let mut pts = vec![gs.space.pos[j]];
+            pts.extend(gs.sel.map(|i| gs.space.pos[i]));
+            let d = cam::fit_distance(
+                &pts,
+                dest.target,
+                dest.theta,
+                dest.psi,
+                pane,
+                FOCUS_PAD,
+                gs.d_min(),
+            )
+            .max(dest.d());
+            Some(Pose {
+                ln_d: d.ln(),
+                ..dest
+            })
+        })
     };
-    // keep it in view: centre it, at the same distance, when it is near or past an edge
-    let off =
-        place.is_none_or(|p| p[0] < 60.0 || p[1] < 60.0 || p[0] > w - 60.0 || p[1] > h - 60.0);
-    if off && w > 0.0 {
-        focus_node(&target, Some(d));
+    if let Some(to) = refit {
+        cam_to(to, Move::Ease(cam::EASE_MS));
+        // the walk's own move keeps its order
+        let dest = g().dest();
+        WALK.with(|w| {
+            if let Some(w) = w.borrow_mut().as_mut() {
+                w.pose = dest;
+            }
+        });
     }
     insp::mark_chip(Some(&target));
     let shown = if target.ends_with('/') {
@@ -2401,7 +2626,11 @@ pub fn walk(step: i64) {
 /// Forget the walk (the selection moved, or esc). True when there was one to forget.
 pub fn walk_reset() -> bool {
     let had = WALK.with(|w| w.borrow_mut().take()).is_some();
-    let drawn = g().cursor.take().is_some();
+    let drawn = {
+        let mut gs = g();
+        gs.walk_at = None;
+        gs.cursor.take().is_some()
+    };
     if had || drawn {
         insp::mark_chip(None);
         schedule();
@@ -2419,8 +2648,11 @@ pub fn walk_stop() -> bool {
     true
 }
 
-/// z: bring the selection and the connections the walk steps through into view, fitted to the
-/// pane from where the camera looks now (0 fits the whole graph).
+/// z, unless the Results view is active: the selection and the connections the walk steps
+/// through, solved as a selected card is (`solve_for`): the camera looks along the smallest
+/// principal axis of the selection and its members in its region, fitted to the pane, and the
+/// members in other regions run out to the rim as portals. The scale is focus, nothing moves
+/// but the camera, and no history entry is pushed. With nothing selected, the galaxy fit.
 pub fn frame_selection() {
     let Some(idx) = state::idx() else { return };
     let Some(sel) = state::sel() else {
@@ -2428,41 +2660,96 @@ pub fn frame_selection() {
         return;
     };
     let members = insp::walk_list(&idx, &sel);
-    let (to, rescaled) = {
+    let plan = {
         let mut gs = g();
-        let Some(&i) = gs.at.get(&sel) else { return };
-        let r = gs.region_of(i);
-        let rescaled = gs.set_scale(Scale::Focus, r);
-        let target = gs.space.pos[i];
-        let mut pts = vec![target];
-        for (m, _) in &members {
-            if let Some(&j) = gs.at.get(m) {
-                pts.push(gs.space.pos[j]);
-            }
-        }
-        let dest = gs.dest();
-        let d = cam::fit_distance(
-            &pts,
-            target,
-            dest.theta,
-            dest.psi,
-            gs.pane(),
-            FIT_PAD,
-            gs.d_min(),
-        );
-        gs.autofit = true;
-        gs.fit = Fit::Points(pts, FIT_PAD);
-        let to = Pose {
-            target,
-            ln_d: d.ln(),
-            ..dest
-        };
-        (to, rescaled)
+        gs.at.get(&sel).copied().map(|i| {
+            let set: Vec<usize> = members
+                .iter()
+                .filter_map(|(m, _)| gs.at.get(m).copied())
+                .collect();
+            let (to, pts, ids) = gs.solve_for(i, &set);
+            gs.autofit = true;
+            gs.fit = Fit::Points(pts, FOCUS_PAD);
+            gs.focus_ids = Rc::new(ids);
+            let unframed = gs.matches.take().is_some();
+            let r = gs.region_of(i);
+            (to, gs.set_scale(Scale::Focus, r) || unframed)
+        })
     };
+    let Some((to, rescaled)) = plan else { return };
     cam_to(to, Move::Ease(cam::EASE_MS));
     if rescaled {
         retier();
     }
+}
+
+/// z with the Results view active: the matches (`ids`) framed where they are, across regions.
+/// They become the focus set (`G::matches`): the camera looks along their smallest principal
+/// axis, at the middle of their view-plane extent at their mean depth, fitted to the pane, at
+/// focus scale in the region that holds the most of them. No card moves and no history entry is
+/// pushed. With no match in the graph, the selection is framed instead.
+pub fn frame_set(ids: &[String]) {
+    let plan = {
+        let mut gs = g();
+        let mut set: Vec<usize> = ids
+            .iter()
+            .filter_map(|id| gs.at.get(id).copied())
+            .filter(|&i| gs.nodes[i].kind != Kind::Root)
+            .collect();
+        set.sort_unstable();
+        set.dedup();
+        (!set.is_empty()).then(|| {
+            let pts: Vec<cam::V3> = set.iter().map(|&i| gs.space.pos[i]).collect();
+            let dest = gs.dest();
+            let dir = cam::solve_view(&pts, cam::basis(dest.theta, dest.psi).dir);
+            let (theta, psi) = cam::angles(dir, dest.theta);
+            let target = view_centre(&pts, theta, psi);
+            let d = cam::fit_distance(&pts, target, theta, psi, gs.pane(), FOCUS_PAD, gs.d_min());
+            let mut per: std::collections::BTreeMap<usize, usize> = Default::default();
+            for &i in &set {
+                if let Some(r) = gs.region_of(i) {
+                    *per.entry(r).or_insert(0) += 1;
+                }
+            }
+            let region = per
+                .iter()
+                .max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0)))
+                .map(|(&r, _)| r);
+            gs.focus_ids = Rc::new(set.iter().map(|&i| gs.ids[i].clone()).collect());
+            gs.matches = Some(set);
+            gs.autofit = true;
+            gs.fit = Fit::Points(pts, FOCUS_PAD);
+            gs.set_scale(Scale::Focus, region);
+            Pose {
+                target,
+                theta,
+                psi,
+                ln_d: d.ln(),
+            }
+        })
+    };
+    match plan {
+        Some(to) => {
+            cam_to(to, Move::Ease(cam::EASE_MS));
+            retier();
+        }
+        None => frame_selection(),
+    }
+}
+
+/// The middle of a set's extent in the view plane looking from `theta`/`psi`, at its mean depth.
+fn view_centre(pts: &[cam::V3], theta: f64, psi: f64) -> cam::V3 {
+    let b = cam::basis(theta, psi);
+    let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+    let mut depth = 0.0;
+    for p in pts {
+        let (x, y) = (cam::dot(*p, b.r), cam::dot(*p, b.u));
+        lo = [lo[0].min(x), lo[1].min(y)];
+        hi = [hi[0].max(x), hi[1].max(y)];
+        depth += cam::dot(*p, b.dir) / pts.len().max(1) as f64;
+    }
+    let (x, y) = ((lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0);
+    [0, 1, 2].map(|k| x * b.r[k] + y * b.u[k] + depth * b.dir[k])
 }
 
 // ---- input -----------------------------------------------------------------------------------

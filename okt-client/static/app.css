@@ -39,6 +39,8 @@
      scale word (the overlay's font, #goverlay) */
   --graph-compass: var(--ink-2);
   --graph-compass-far: var(--faint);
+  /* the keyboard walk (j/k): its target's edge, this wide in the accent, over the link edges */
+  --graph-walk-w: 3px;
 }
 
 :root[data-theme="terminal"] {

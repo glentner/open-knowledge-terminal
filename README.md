@@ -76,10 +76,13 @@ yet; `ROADMAP.md` tracks them.
 - FILES: space opens or closes the selected folder, or shows a file in the graph; `u` goes up to
   the parent folder and folds everything under it (at the top, the whole tree); and closing a
   folder, by any key or click, folds its subfolders too, so it reopens one level deep.
-- GRAPH: `j`/`k` step through the selection's connections in the order the inspector lists them
-  (a dashed ring, the card and the hint show where), Enter or space goes there, esc stops; with no
-  walk, space opens or closes the selected folder and Enter shows a file's content; `z` zooms to
-  the selection and its neighbors. The camera: ←/→ orbit it around what it looks at and
+- GRAPH: `j`/`k` step through the selection's connections clockwise around the selection, in
+  screen order like a clock hand from 12 o'clock (a dashed ring, a thicker edge, the inspector's
+  marked card and the hint show where; a connection in another region is a portal, its edge out
+  to that region on the rim, labelled with its path), Enter or space goes there, esc stops; with
+  no walk, space opens or closes the selected folder and Enter shows a file's content; `z` turns
+  and fits the camera to the selection and its links, or, from the Results view, to the list's
+  matches wherever they are, moving no card. The camera: ←/→ orbit it around what it looks at and
   PageUp/PageDown tilt it, while focus is on the page rather than the inspector; `+`/`=` and `-`
   move it closer and farther, and `0` fits the whole graph, keeping the selection; dragging
   orbits, and the wheel or a pinch moves it closer or farther.

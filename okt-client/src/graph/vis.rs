@@ -162,12 +162,15 @@ pub const HIDDEN: u8 = u8::MAX;
 
 /// What is in focus: the nodes at its centre (tier 0), nodes that join tier 1 without a link (a
 /// selected folder's own children), and the focused regions. No centre and no regions is no
-/// selection: nothing but the glyphs is drawn.
+/// selection: nothing but the glyphs is drawn. `links` says whether the centre's links join tier
+/// 1: they do for a selection; a results list's matches framed in place are the whole focus set,
+/// so nothing past them is drawn but the rest of a single focused region.
 #[derive(Clone, Copy, Debug)]
 pub struct Focus<'a> {
     pub centre: &'a [usize],
     pub kids: &'a [usize],
     pub regions: &'a [usize],
+    pub links: bool,
 }
 
 /// Each node's tier for a focus, [`HIDDEN`] when it is not drawn. `folder` marks the nodes a hop
@@ -193,7 +196,7 @@ pub fn tiers(
     // the centre is where the walk starts, so a focused folder's own links count; past it,
     // folders end a path
     let mut next: Vec<usize> = Vec::new();
-    for &c in &ring {
+    for &c in ring.iter().filter(|_| f.links) {
         for &m in &vis.adj[c] {
             if hop[m] == u8::MAX {
                 hop[m] = 1;
@@ -296,6 +299,63 @@ pub fn edge_kind(
         }
     }
     kind
+}
+
+/// A walk target as the screen shows it: where its point projects (`None` behind the camera),
+/// where it meets the rim, and whether it is a portal (a link in a region out of focus).
+#[derive(Clone, Copy, Debug)]
+pub struct Target<'a> {
+    pub px: Option<[f64; 2]>,
+    pub rim: [f64; 2],
+    pub portal: bool,
+    pub path: &'a str,
+}
+
+impl Target<'_> {
+    /// Where the walk sees it: a portal, or a target behind the camera, sits at its rim point;
+    /// anything else at its point.
+    pub fn at(&self) -> [f64; 2] {
+        match self.px {
+            Some(p) if !self.portal => p,
+            _ => self.rim,
+        }
+    }
+}
+
+/// The on-screen angle of `p` around `focus`, both in pane px (y down): clockwise from 12
+/// o'clock, in radians in `[0, 2π)`.
+pub fn screen_angle(focus: [f64; 2], p: [f64; 2]) -> f64 {
+    let (dx, dy) = (p[0] - focus[0], p[1] - focus[1]);
+    if dx == 0.0 && dy == 0.0 {
+        return 0.0;
+    }
+    let a = dx.atan2(-dy);
+    if a < 0.0 {
+        a + std::f64::consts::TAU
+    } else {
+        a
+    }
+}
+
+/// The order the walk steps through `targets`: clockwise around the focus from 12 o'clock, by
+/// [`screen_angle`] of where each shows ([`Target::at`]). Angles equal to a nanoradian tie, and
+/// ties go to the nearer target, then the path. Returns indices into `targets`.
+pub fn angular_order(focus_px: [f64; 2], targets: &[Target]) -> Vec<usize> {
+    let key = |t: &Target| {
+        let p = t.at();
+        let a = (screen_angle(focus_px, p) * 1e9).round() as i64;
+        (a, (p[0] - focus_px[0]).hypot(p[1] - focus_px[1]))
+    };
+    let keys: Vec<(i64, f64)> = targets.iter().map(key).collect();
+    let mut order: Vec<usize> = (0..targets.len()).collect();
+    order.sort_by(|&a, &b| {
+        keys[a]
+            .0
+            .cmp(&keys[b].0)
+            .then(keys[a].1.total_cmp(&keys[b].1))
+            .then_with(|| targets[a].path.cmp(targets[b].path))
+    });
+    order
 }
 
 /// How much larger than a bare card a card is drawn: it grows with the log of its links, and an
@@ -492,6 +552,7 @@ mod tests {
                 centre: &c,
                 kids: &[],
                 regions: &r,
+                links: true,
             };
             tiers(&self.vis, &f, &self.folder, &fold, show_all)
         }
@@ -544,6 +605,7 @@ mod tests {
             centre: &c,
             kids: &kids,
             regions: &r,
+            links: true,
         };
         let t = tiers(&kb.vis, &f, &kb.folder, &fold, false);
         assert_eq!(t[kb.i("a/s/")], 0);
@@ -619,6 +681,7 @@ mod tests {
             centre: &c,
             kids: &[],
             regions: &r,
+            links: true,
         };
         let t = tiers(&kb.vis, &f, &kb.folder, &fold, true);
         assert!(t.iter().all(|&x| x <= 3), "{t:?}");
@@ -630,6 +693,7 @@ mod tests {
             centre: &[],
             kids: &[],
             regions: &[],
+            links: true,
         };
         let t0 = tiers(&kb.vis, &none, &kb.folder, &fold, true);
         assert!(t0.iter().all(|&x| x == 3));
@@ -669,6 +733,7 @@ mod tests {
             centre: &c,
             kids: &[],
             regions: &r,
+            links: true,
         };
         let t = tiers(&kb.vis, &f, &kb.folder, &fold, false);
         assert_eq!(t[kb.i("a/far.md")], HIDDEN);
@@ -685,5 +750,138 @@ mod tests {
         assert_eq!(importance(0.0, false), 1.0);
         assert!(importance(10.0, false) > importance(1.0, false));
         assert!((importance(3.0, true) / importance(3.0, false) - 1.4).abs() < 1e-12);
+    }
+
+    fn tgt(px: Option<[f64; 2]>, rim: [f64; 2], portal: bool, path: &str) -> Target<'_> {
+        Target {
+            px,
+            rim,
+            portal,
+            path,
+        }
+    }
+
+    #[test]
+    fn angular_clockwise() {
+        let f = [100.0, 100.0];
+        // 12, 3, 6 and 9 o'clock and the diagonals between, given out of order
+        let pts = [
+            ("w", [60.0, 100.0]),
+            ("s", [100.0, 150.0]),
+            ("ne", [130.0, 70.0]),
+            ("n", [100.0, 40.0]),
+            ("nw", [70.0, 70.0]),
+            ("e", [180.0, 100.0]),
+            ("se", [120.0, 120.0]),
+            ("sw", [80.0, 130.0]),
+        ];
+        let ts: Vec<Target> = pts
+            .iter()
+            .map(|(id, p)| tgt(Some(*p), [0.0, 0.0], false, id))
+            .collect();
+        let got: Vec<&str> = angular_order(f, &ts).iter().map(|&k| pts[k].0).collect();
+        assert_eq!(got, ["n", "ne", "e", "se", "s", "sw", "w", "nw"]);
+        // the angles themselves: 0 at 12 o'clock, a quarter turn at 3, rising clockwise
+        let a = |p: [f64; 2]| screen_angle(f, p);
+        assert_eq!(a([100.0, 40.0]), 0.0);
+        assert!((a([180.0, 100.0]) - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+        assert!((a([100.0, 150.0]) - std::f64::consts::PI).abs() < 1e-12);
+        assert!((a([60.0, 100.0]) - 1.5 * std::f64::consts::PI).abs() < 1e-12);
+        // just left of 12 o'clock is the end of the turn, not its start
+        assert!(a([99.999, 40.0]) > 6.28 && a([99.999, 40.0]) < std::f64::consts::TAU);
+        // every angle is in [0, 2π) over a full circle of points
+        for k in 0..360 {
+            let t = (k as f64).to_radians();
+            let v = a([100.0 + 50.0 * t.sin(), 100.0 - 50.0 * t.cos()]);
+            assert!((0.0..std::f64::consts::TAU).contains(&v), "{k}: {v}");
+        }
+        assert!(angular_order(f, &[]).is_empty());
+    }
+
+    #[test]
+    fn angular_ties() {
+        let f = [0.0, 0.0];
+        // three on one ray (3 o'clock): the nearer first; two at the same place: by path
+        let ts = [
+            tgt(Some([30.0, 0.0]), [0.0; 2], false, "far"),
+            tgt(Some([10.0, 0.0]), [0.0; 2], false, "near"),
+            tgt(Some([20.0, 0.0]), [0.0; 2], false, "mid-b"),
+            tgt(Some([20.0, 0.0]), [0.0; 2], false, "mid-a"),
+            tgt(Some([0.0, -5.0]), [0.0; 2], false, "top"),
+        ];
+        let got: Vec<&str> = angular_order(f, &ts).iter().map(|&k| ts[k].path).collect();
+        assert_eq!(got, ["top", "near", "mid-a", "mid-b", "far"]);
+        // the order does not depend on the order given
+        let mut rev = ts.to_vec();
+        rev.reverse();
+        let got2: Vec<&str> = angular_order(f, &rev)
+            .iter()
+            .map(|&k| rev[k].path)
+            .collect();
+        assert_eq!(got2, got);
+    }
+
+    #[test]
+    fn angular_portal_rim() {
+        let f = [400.0, 300.0];
+        // a portal projects at 1 o'clock but its region's glyph is on the rim at 9: it sorts at 9
+        let portal = tgt(Some([450.0, 200.0]), [30.0, 300.0], true, "b/portal.md");
+        // a card behind the camera has no point: it sorts at its rim point (6 o'clock)
+        let behind = tgt(None, [400.0, 570.0], false, "a/behind.md");
+        // an ordinary card at 3 o'clock, whatever its rim point says
+        let card = tgt(Some([500.0, 300.0]), [400.0, 30.0], false, "a/card.md");
+        assert_eq!(portal.at(), [30.0, 300.0]);
+        assert_eq!(behind.at(), [400.0, 570.0]);
+        assert_eq!(card.at(), [500.0, 300.0]);
+        let ts = [portal, behind, card];
+        let got: Vec<&str> = angular_order(f, &ts).iter().map(|&k| ts[k].path).collect();
+        assert_eq!(got, ["a/card.md", "a/behind.md", "b/portal.md"]);
+        // a portal behind the camera sits at its rim point too
+        let gone = tgt(None, [400.0, 30.0], true, "c/gone.md");
+        assert_eq!(gone.at(), [400.0, 30.0]);
+        let ts = [portal, gone, card];
+        let got: Vec<&str> = angular_order(f, &ts).iter().map(|&k| ts[k].path).collect();
+        assert_eq!(got, ["c/gone.md", "a/card.md", "b/portal.md"]);
+    }
+
+    #[test]
+    fn matches_without_links() {
+        let (nodes, order) = fixture();
+        let i = |id: &str| nodes.iter().position(|n| n.id == id).unwrap();
+        let edges = vec![
+            (i("a/x.md"), i("c/w.md"), 1.0),
+            (i("a/x.md"), i("a/b/y.md"), 1.0),
+            (i("c/w.md"), i("d/v.md"), 1.0),
+        ];
+        let v = build(&nodes, &edges, &order);
+        let folder: Vec<bool> = nodes.iter().map(|n| !n.file && !n.surface).collect();
+        let fold = vec![None; nodes.len()];
+        // two matches in two regions: they alone are drawn, their links are not
+        let c = [i("a/x.md"), i("d/v.md")];
+        let r = [v.region[c[0]], v.region[c[1]]];
+        let f = Focus {
+            centre: &c,
+            kids: &[],
+            regions: &r,
+            links: false,
+        };
+        let t = tiers(&v, &f, &folder, &fold, false);
+        for (k, n) in nodes.iter().enumerate() {
+            let want = if c.contains(&k) { 0 } else { HIDDEN };
+            assert_eq!(t[k], want, "{}", n.id);
+        }
+        // one match: the rest of its region is drawn faint, nothing else
+        let c1 = [i("a/x.md")];
+        let r1 = [v.region[c1[0]]];
+        let f1 = Focus {
+            centre: &c1,
+            kids: &[],
+            regions: &r1,
+            links: false,
+        };
+        let t1 = tiers(&v, &f1, &folder, &fold, false);
+        assert_eq!(t1[i("a/x.md")], 0);
+        assert_eq!(t1[i("a/b/y.md")], 3);
+        assert_eq!(t1[i("c/w.md")], HIDDEN);
     }
 }

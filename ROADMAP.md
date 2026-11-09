@@ -73,6 +73,13 @@ it or orbiting first. Zoom toward what is under the pointer without losing the s
 
 **Seed:** [`issues/graph-zoom-to-cursor.md`](issues/graph-zoom-to-cursor.md)
 
+### 7. Mark the walk's target past the chip cap
+
+The inspector shows at most 40 chips per Connections group, so a graph walk target past them gets
+no mark. Show and mark its row wherever it is in the group.
+
+**Seed:** [`issues/walk-mark-chip-cap.md`](issues/walk-mark-chip-cap.md)
+
 ---
 
 ## Settled questions

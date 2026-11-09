@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feat/graph-galaxy
 base: main
-current_phase: P6
+current_phase: P7
 last_updated: '2026-11-08'
 phases:
 - id: P1
@@ -70,7 +70,7 @@ phases:
   verify: sh spec/graph-galaxy/verify/gate.sh P5
 - id: P6
   name: z framing and the angular walk with portals
-  status: pending
+  status: done
   satisfies:
   - R4
   - R5
@@ -571,7 +571,7 @@ is placed first.
 without moving a card. `j`/`k` step clockwise on screen, with the inspector's row marked. Portals
 carry the target's path.
 
-- [ ] `keys.rs` `z`:
+- [x] `keys.rs` `z`:
   - Capture `s().view == "list"` and clone `S.list` before switching to the graph, then drop the
     borrow.
   - With Results active, the focus set is the FIND files and names, or the Paths items, and the
@@ -579,28 +579,69 @@ carry the target's path.
     fitted, the others as rim portals, per amended R4).
   - Both call `graph::frame_set(ids)` via `cam_to`, with the scale kept at focus (PLAN § 2.3). No
     history push (row D10).
-- [ ] `graph/vis.rs`: `angular_order(focus_px, targets)`, clockwise from 12 o'clock; ties go to
+- [x] `graph/vis.rs`: `angular_order(focus_px, targets)`, clockwise from 12 o'clock; ties go to
       distance, then path; portal and behind-camera targets sit at their rim point. Tests:
   - `angular_clockwise`.
   - `angular_ties`.
   - `angular_portal_rim`.
-- [ ] `graph.rs` walk:
+- [x] `graph.rs` walk:
   - The walk target's edge is drawn thicker (PLAN § 2.5; moved here from P4).
   - Membership comes from `insp::walk_list`. The order is computed from the destination pose and
     frozen per walk; a user orbit or zoom re-sorts it and re-finds the target by id.
   - The camera holds still during j/k, except a small re-fit for an off-pane target in the region.
   - Hooks: `data-walk`, `data-walk-i`, `data-walk-n`, `data-walk-angle`.
   - The `#ghint` format is kept. The walk target's portal label carries its path.
-- [ ] `insp.rs`: `render()` re-applies `mark_chip(graph::walk_target())`, with no `GS`/`WALK` borrow
+- [x] `insp.rs`: `render()` re-applies `mark_chip(graph::walk_target())`, with no `GS`/`WALK` borrow
       held across it. Update the doc comment.
-- [ ] Docs:
+- [x] Docs:
   - `README.md` § Keys and the `?` list: j/k step clockwise in screen order, replacing "in the order
     the inspector lists them"; `z` frames the selection and its links, or the Results matches.
   - Doc comments at `keys.rs:400`, the `graph.rs` walk and `insp.rs:484`.
-- [ ] Seed `issues/walk-mark-chip-cap.md` (`unshaped`) and its `ROADMAP.md` entry. The inspector caps
+- [x] Seed `issues/walk-mark-chip-cap.md` (`unshaped`) and its `ROADMAP.md` entry. The inspector caps
       chips at 40 per group, so a walk target past the cap gets no mark. This is pre-existing and not
       fixed in this cycle.
-- [ ] `tests/ui/keys.mjs`: the P6 rows.
+- [x] `tests/ui/keys.mjs`: the P6 rows.
+- *Amended in build (2026-11-08):*
+  - **`z`:** the Results branch calls `graph::frame_set(ids)`; the selection branch keeps the name
+    `frame_selection` and solves through `solve_for(i, members)`, which `card_view` now calls with
+    the card's links, so a card is solved exactly as a selection is and a folder with its walk
+    members in its region. Both ease through `cam_to` at focus scale. Neither pushes a history
+    entry; a `z` pressed in another view keeps today's view switch and its entry (row D10: view
+    switches keep theirs).
+  - **The Results focus** is `G::matches`: the matches are tier 0 and the whole focus set. Their
+    links are not drawn (`vis::Focus` gains `links`, false for it; the test
+    `matches_without_links`), and one matched region draws the rest of it at tier 3, so
+    `data-focus-n` (tier 0 and 1 as uploaded) is the match count. The target is the middle of the
+    matches' view-plane extent at their mean depth (`view_centre`), the active region the one
+    holding the most matches. A selection change, `0`, a `z` without Results or a walk ends it; a
+    rebuild keeps it by id.
+  - **Walk order:** `vis::angular_order(focus_px, targets)` takes `vis::Target { px, rim, portal,
+    path }` and sorts by `vis::screen_angle` of `Target::at()`, angles tied to the nanoradian. The
+    graph places a card at its point (on or off the pane), a portal whose card is off the pane at
+    its region's glyph (at the scale's rim weight), and a card behind the camera at the rim in its
+    own direction. The walk records the destination pose its order came from; a later step under
+    another destination re-sorts and re-finds the target by id, and the walk's own re-fit
+    updates the record instead.
+  - **Re-fit:** a target that is not at the rim and lies within 40 px of the pane's edge, or behind
+    the camera, moves the camera out (same target and angles) just far enough to fit the selection
+    and the target; root and surface targets count as in the region, since they have no rim
+    glyph.
+  - **The thicker edge** is drawn per frame as a screen-space mark in the accent,
+    `--graph-walk-w` wide (3 px), from the selection to where the target shows, only when the two
+    are linked (a folder's own children have no edge); a step uploads nothing. The hooks
+    `data-walk`, `data-walk-i`, `data-walk-n` and `data-walk-angle` (degrees, clockwise from 12)
+    are written by `gl::publish` from the frame (`gl.rs`, outside the Touches list).
+  - **Labels:** the walk target's portal label is its whole path (other portals stay
+    middle-ellipsised to 34 characters, row D7), and a portal target behind the camera is still
+    labelled at its region's glyph.
+  - **The `?` GRAPH list** gains a portals row.
+  - **`keys.mjs`:** the env.sh hub (`contact/index.md`) has 138 chips in one Connections group, so
+    an angular walk can start past the chip cap. The existing GRAPH walk checks and the P2
+    ArrowDown row now walk from `walker`, the most connected card whose every group fits 40 chips.
+    The P6 clockwise row walks the hub, and at a target past the cap asserts that no chip is
+    marked (the seed's defect), and that targets with a chip have theirs marked. The `z` re-solve
+    row uses the most connected card whose set has λ₁/λ₀ ≥ 1.25, as the P4 axis row does: the hub's
+    set is degenerate (1.095), and a degenerate solve can land near the orbited view.
 - **Verify:** `sh spec/graph-galaxy/verify/gate.sh P6`.
 - **Touches:** `okt-client/src/keys.rs`, `okt-client/src/graph.rs`, `okt-client/src/graph/vis.rs`,
   `okt-client/src/insp.rs`, `okt-client/src/chrome.rs`, `README.md`, `okt-client/static/app.css`,

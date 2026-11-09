@@ -16,9 +16,9 @@ use crate::js::{self, esc, fmt_n, num};
 use crate::model::{
     Blame, Commit, CommitDetail, DataTable, FilePayload, Idx, Node, ext_of, fam_var, kind_name,
 };
-use crate::nav;
 use crate::state::{self, FileEntry, HistEntry, boot, cfg, s, s_mut};
 use crate::views;
+use crate::{graph, nav};
 
 thread_local! {
     static TOKEN: Cell<u64> = const { Cell::new(0) };
@@ -214,7 +214,8 @@ fn scroll_to_el(body: &Element, el: &Element) {
 
 // ---- render -----------------------------------------------------------------------------------
 
-/// `renderInspector()`
+/// `renderInspector()`. Once the body is in, the graph walk's target gets its chip marked again
+/// (`mark_chip`), so the mark survives a re-render such as a tab switch.
 pub fn render() {
     let Some(idx) = state::idx() else { return };
     let tok = TOKEN.with(|t| {
@@ -309,6 +310,11 @@ pub fn render() {
                     }
                 }
                 after(n.as_ref());
+                // the walk target is read (and its borrow dropped) before the mark is applied
+                let walked = graph::walk_target();
+                if walked.is_some() {
+                    mark_chip(walked.as_deref());
+                }
             }
             Err(msg) => dom::set_html(&body, &format!("<div class=\"empty\">{}</div>", esc(&msg))),
         }
@@ -481,8 +487,10 @@ fn edge_label(k: &str, out: bool) -> &'static str {
     }
 }
 
-/// What j and k step through in the graph: a folder's subfolders and files in tree order,
-/// then the Connections groups in the order the inspector shows them, each node once.
+/// Who j and k step through in the graph: a folder's subfolders and files, then the
+/// Connections groups, each node once. This is the membership only: the graph walks it in
+/// on-screen angular order (`graph::walk`), and `mark_chip` keeps this list's row of the walk's
+/// target marked, so the two stay linked although their orders differ.
 pub fn walk_list(idx: &Idx, id: &str) -> Vec<(String, &'static str)> {
     let mut out: Vec<(String, &'static str)> = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -519,7 +527,8 @@ pub fn walk_list(idx: &Idx, id: &str) -> Vec<(String, &'static str)> {
     out
 }
 
-/// Mark the inspector's card for the node the graph walk is on (none: unmark).
+/// Mark the inspector's card for the node the graph walk is on (none: unmark). Only the chips
+/// shown are marked: a group shows its first 40, so a target past them gets no mark.
 pub fn mark_chip(id: Option<&str>) {
     for c in dom::qa("#ibody .nchip.kb") {
         dom::remove_class(&c, "kb");

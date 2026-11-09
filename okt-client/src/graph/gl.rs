@@ -716,6 +716,11 @@ pub struct Drawn {
     pub tiers: [usize; 4],
     /// JSON: cards in the draw list per region key
     pub drawn_regions: String,
+    /// the walk's target (empty with no walk), where it is in the walk (1-based, of n; zeros with
+    /// no walk), and its on-screen angle about the selection in degrees, clockwise from 12
+    pub walk: String,
+    pub walk_at: (usize, usize),
+    pub walk_angle: Option<f64>,
 }
 
 thread_local! {
@@ -755,7 +760,7 @@ pub fn publish(cv: &Element, d: &Drawn) {
             .collect::<Vec<_>>()
             .join(",")
     );
-    let vals: [(&'static str, String); 20] = [
+    let vals: [(&'static str, String); 24] = [
         ("data-scale", d.scale.to_string()),
         ("data-region", d.region.clone()),
         (
@@ -778,6 +783,13 @@ pub fn publish(cv: &Element, d: &Drawn) {
         ("data-focus-ids", d.focus_ids.clone()),
         ("data-tiers", d.tiers.map(|t| t.to_string()).join(",")),
         ("data-drawn-regions", d.drawn_regions.clone()),
+        ("data-walk", d.walk.clone()),
+        ("data-walk-i", d.walk_at.0.to_string()),
+        ("data-walk-n", d.walk_at.1.to_string()),
+        (
+            "data-walk-angle",
+            d.walk_angle.map(deg1).unwrap_or_default(),
+        ),
         ("data-anim", if d.anim { "1" } else { "0" }.to_string()),
     ];
     HOOKS.with(|h| {

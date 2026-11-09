@@ -20,6 +20,10 @@
 //   LABELS at most 24 cards labelled at once (region names not counted), flat on the overlay,
 //          never two labels overlapping: at rest on the hub, under show all, and through a drag
 //          orbit
+//   WALK   z re-solves the camera for the selection and its links, or from Results for the
+//          FIND matches across regions, moving no card; j/k step clockwise in screen order around
+//          the selection, a target in another region a portal labelled with its path, its
+//          inspector chip marked and kept marked through a re-render
 //   LAYOUT the 3D layout: stable across a shuffled reload, and adding cards (written into the
 //          env.sh clone, $OKT_KB) moves nothing outside their folders
 //   node tests/ui/keys.mjs [okt-url]
@@ -42,6 +46,15 @@ const degree = {};
 for (const e of idx.edges) { const [s, t] = Array.isArray(e) ? e : [e.s, e.t]; degree[s] = (degree[s] || 0) + 1; degree[t] = (degree[t] || 0) + 1; }
 const hub = files.filter(n => n.id.endsWith('.md')).sort((a, b) => (degree[b.id] || 0) - (degree[a.id] || 0))[0].id;
 const word = hub.split('/').pop().replace(/\.md$/, '').split(/[_-]/)[0];
+// the most connected markdown file whose every Connections group fits the inspector's 40 chips, so
+// each step of a walk from it has a chip to mark (issues/walk-mark-chip-cap.md)
+const groups = {};
+for (const e of idx.edges) {
+  const [s, t, k] = Array.isArray(e) ? e : [e.s, e.t, e.k];
+  for (const [id, g] of [[s, `out:${k}`], [t, `in:${k}`]]) { groups[id] = groups[id] || {}; groups[id][g] = (groups[id][g] || 0) + 1; }
+}
+const walker = files.filter(n => n.id.endsWith('.md') && (degree[n.id] || 0) >= 3 && Math.max(...Object.values(groups[n.id] || { none: 0 })) <= 40)
+  .sort((a, b) => (degree[b.id] || 0) - (degree[a.id] || 0))[0].id;
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 }, permissions: ['clipboard-read', 'clipboard-write'] });
@@ -128,11 +141,11 @@ st = await state();
 check('space on a file shows the graph', st.view === 'graph' && st.sel === deep, st);
 
 // ---- GRAPH ----------------------------------------------------------------------------------
-await go('#v=graph&s=' + encodeURIComponent(hub));
+await go('#v=graph&s=' + encodeURIComponent(walker));
 await key('j');
 st = await state();
 const m1 = st.hint.match(/^1\/(\d+) · /);
-check(`j starts the walk from ${hub}`, !!m1 && !!st.chip, st);
+check(`j starts the walk from ${walker}`, !!m1 && !!st.chip, st);
 const total = m1 ? +m1[1] : 0;
 await key('j');
 st = await state();
@@ -143,7 +156,7 @@ st = await state();
 check('k from the first wraps to the last', st.hint.startsWith(`${total}/${total} · `), st.hint);
 await key('Escape');
 st = await state();
-check('esc stops the walk, keeping the selection', !st.hint.includes(' · ⏎ go') && !st.chip && st.sel === hub, st);
+check('esc stops the walk, keeping the selection', !st.hint.includes(' · ⏎ go') && !st.chip && st.sel === walker, st);
 await key('j');
 st = await state();
 const target = st.chip;
@@ -337,7 +350,7 @@ await page.evaluate(() => document.activeElement?.blur());
   await page.evaluate(() => document.activeElement?.blur());
 }
 {
-  await go('#v=graph&s=' + encodeURIComponent(hub));
+  await go('#v=graph&s=' + encodeURIComponent(walker));
   await key('ArrowDown');
   st = await state();
   const m = st.hint.match(/^1\/(\d+) · /);
@@ -346,6 +359,7 @@ await page.evaluate(() => document.activeElement?.blur());
   const back = (await state()).hint;
   check('ArrowDown still walks in the graph', !!m && !!st.chip && back.startsWith(`${n}/${n} · `), { first: st.hint, chip: st.chip, back });
   await key('Escape');
+  await go('#v=graph&s=' + encodeURIComponent(hub));
 }
 {
   await waits(() => page.keyboard.press('0'));
@@ -828,6 +842,155 @@ const showAll = async on => {
   check('labels stay capped and apart while orbiting',
     span >= 900 && seen.length >= 5 && most >= 1 && bad.length === 0,
     { span, values: seen.length, most, bad: bad.slice(0, 3) });
+}
+
+// ---- WALK -----------------------------------------------------------------------------------
+// z re-solves the camera where things are: for the selection and its links, or, from the Results
+// view, for the FIND matches across regions; no card moves. j/k step through the selection's
+// connections clockwise in screen order, from 12 o'clock around the selection, in the order taken
+// from the view the walk started under. The test computes it by projecting positions under that
+// view: a card at its point; a portal (a link into another top-level folder) whose card is off the
+// pane at its region's glyph on the rim, and a card behind the camera at the rim in its own
+// direction, the rim lying in the view-plane direction from the pane centre (where the selection
+// is). The inspector marks the target's chip; it shows 40 chips per group, so a target past them
+// has none to mark (issues/walk-mark-chip-cap.md) and then no chip may be marked.
+const clipOf = (m, p) => [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12], m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13], m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15]];
+const clockAngle = v => { const a = Math.atan2(v[0], -v[1]); return a < 0 ? a + 2 * Math.PI : a; };
+const sameAt = (a, b) => { const ks = Object.keys(a || {}); return ks.length > 0 && ks.length === Object.keys(b || {}).length && ks.every(id => (b[id] || []).length === 3 && a[id].every((c, i) => Object.is(c, b[id][i]))); };
+{
+  // a card whose set has a well-defined axis (the hub when it has one), so the solve has an
+  // orientation to come back to
+  const pos = await page.evaluate(() => window.__oktPos);
+  const card = [hub, ...files.map(n => n.id).filter(id => id !== hub && pos[id]).sort((x, y) => (degree[y] || 0) - (degree[x] || 0))]
+    .find(id => { const set = fitSet(id); return set.length >= 5 && set.every(x => pos[x]) && axesOf(set.map(x => pos[x])).ratio >= 1.25; }) || hub;
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(outer)));
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(card)));
+  await page.evaluate(() => document.activeElement?.blur());
+  const c0 = await cam();
+  const p0 = await page.evaluate(() => window.__oktPos);
+  for (let k = 0; k < 4; k++) await waits(() => page.keyboard.press('ArrowRight'));
+  const c1 = await cam();
+  const h0 = await page.evaluate(() => history.length);
+  await waits(() => page.keyboard.press('z'));
+  const c2 = await cam();
+  const p1 = await page.evaluate(() => window.__oktPos);
+  const h1 = await page.evaluate(() => history.length);
+  const turned = Math.max(Math.abs(dang(c1.theta, c2.theta)), Math.abs(c2.psi - c1.psi));
+  check('z re-solves the camera and keeps the layout',
+    Math.abs(Math.abs(dang(c0.theta, c1.theta)) - 60) <= 1 && turned >= 5 && c2.move !== c1.move && !!c0.layout && c2.layout === c0.layout && c2.posHash === c0.posHash && sameAt(p0, p1) && h1 === h0 && c2.sel === card,
+    { card, orbit: +dang(c0.theta, c1.theta).toFixed(1), turned: +turned.toFixed(1), layout: c2.layout === c0.layout, posHash: c2.posHash === c0.posHash, positions: sameAt(p0, p1), history: [h0, h1], sel: c2.sel });
+}
+{
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(outer)));
+  await waits(() => go('#v=graph&s=' + encodeURIComponent(hub)));
+  await page.evaluate(() => document.activeElement?.blur());
+  const box = await page.locator('#graph').boundingBox();
+  const W = box.width, H = box.height;
+  const view0 = JSON.parse((await gattr('data-view')) || '[]');
+  const pos = await page.evaluate(() => window.__oktPos);
+  const screenOf = c => c[2] > 0 ? [(c[0] / c[2] + 1) / 2 * W, (1 - c[1] / c[2]) / 2 * H] : null;
+  const hubS = screenOf(clipOf(view0, pos[hub])) || [W / 2, H / 2];
+  const portalOf = id => { const r = regionOf(id); return r && r !== regionKey(hub) ? r : null; };
+  // where the walk sees a target, as a screen vector from the hub
+  const seen = id => {
+    const c = clipOf(view0, pos[id]);
+    const s = screenOf(c);
+    const on = !!s && s[0] >= 0 && s[1] >= 0 && s[0] <= W && s[1] <= H;
+    const r = portalOf(id);
+    if (r && !on) { const g = clipOf(view0, pos[r]); return [g[0] * W / 2, -g[1] * H / 2]; }
+    if (s) return [s[0] - hubS[0], s[1] - hubS[1]];
+    return [c[0] * W / 2, -c[1] * H / 2];
+  };
+  const shown = new Set(await page.evaluate(() => [...document.querySelectorAll('#ibody .nchip[data-go]')].map(c => c.dataset.go)));
+  const walkState = () => page.evaluate(() => {
+    const g = document.getElementById('graph');
+    return { walk: g.getAttribute('data-walk'), i: +g.getAttribute('data-walk-i'), n: +g.getAttribute('data-walk-n'), chip: document.querySelector('#ibody .nchip.kb')?.dataset.go ?? null };
+  });
+  await key('j', 150);
+  const m = (await state()).hint.match(/^1\/(\d+) · /);
+  const N = m ? +m[1] : 0;
+  const steps = [];
+  let portal = null;
+  for (let k = 1; k <= N; k++) {
+    if (k > 1) await page.keyboard.press('j');
+    await page.waitForFunction(k => document.getElementById('graph').getAttribute('data-walk-i') === String(k), k, { timeout: 3000 }).catch(() => {});
+    const v = await walkState();
+    steps.push(v);
+    if (!portal && v.walk && portalOf(v.walk)) {
+      const r = await restedLabels();
+      portal = { target: v.walk, labels: r.labels.filter(l => l[4] === 'portal'), rim: +(await gattr('data-rim')) };
+    }
+  }
+  const ids = steps.map(v => v.walk);
+  const angles = ids.map(id => (pos[id] ? clockAngle(seen(id)) : NaN));
+  // descents around the cycle (the last back to the first included); equal angles (two portals at
+  // one glyph) are not descents
+  const descents = angles.filter((a, k) => a < angles[k === 0 ? N - 1 : k - 1] - 1e-3).length;
+  const once = new Set(ids).size === N && ids.every(Boolean) && steps.every((v, k) => v.i === k + 1 && v.n === N);
+  const marks = steps.filter(v => (shown.has(v.walk) ? v.chip !== v.walk : v.chip !== null));
+  check('j steps clockwise in screen order',
+    N >= 3 && once && angles.every(Number.isFinite) && descents === 1 && marks.length === 0 && steps.some(v => v.chip === v.walk),
+    { N, once, descents, firstAngles: angles.slice(0, 8).map(a => +(a * 180 / Math.PI).toFixed(1)), marks: marks.slice(0, 3), marked: steps.filter(v => v.chip === v.walk).length });
+  check('a target in another region shows as a portal',
+    !!portal && portal.labels.some(l => String(l[5]).includes(portal.target)) && portal.rim >= 1,
+    portal || { error: 'no walk target in another region', N });
+  // back to a target whose chip the inspector shows
+  for (let k = 0; k < N && !shown.has((await walkState()).walk); k++) {
+    const i0 = (await walkState()).i;
+    await page.keyboard.press('k');
+    await page.waitForFunction(i => document.getElementById('graph').getAttribute('data-walk-i') !== String(i), i0, { timeout: 3000 }).catch(() => {});
+  }
+  await page.waitForTimeout(200);
+  const w1 = await walkState();
+  const kb1 = await page.evaluate(() => [...document.querySelectorAll('#ibody .nchip.kb[data-go]')].map(c => c.dataset.go));
+  check('the inspector marks the walk target',
+    !!w1.walk && kb1.length === 1 && kb1[0] === w1.walk,
+    { walk: w1.walk, marked: kb1 });
+  await key('c', 800);
+  await key('o', 300);
+  await page.waitForFunction(() => !!document.querySelector('#ibody .nchip[data-go]'), null, { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const w2 = await walkState();
+  const kb2 = await page.evaluate(() => [...document.querySelectorAll('#ibody .nchip.kb[data-go]')].map(c => c.dataset.go));
+  const tab = (await state()).sel === hub;
+  check('the walk mark survives an inspector render',
+    tab && w2.walk === w1.walk && kb2.length === 1 && kb2[0] === w2.walk,
+    { walk: w2.walk, before: w1.walk, marked: kb2 });
+  await key('Escape');
+}
+{
+  // FIND a word with matches in at least two regions, then z in Results
+  const words = [...new Set([word, 'pearc28', ...files.map(n => n.id).sort((x, y) => (degree[y] || 0) - (degree[x] || 0)).slice(0, 12).map(id => id.split('/').pop().replace(/\.md$/, '').split(/[_-]/)[0])])].filter(w => w.length >= 4);
+  let pick = null;
+  for (const w of words) {
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.fill('#go', `FIND ${w}`);
+    await page.press('#go', 'Enter');
+    await page.waitForFunction(() => !document.getElementById('v-list').hidden && !!document.querySelector('#list [data-id], #list .empty'), null, { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    const got = await page.evaluate(() => [...new Set([...document.querySelectorAll('#list .lsimple[data-id], #list .lgh[data-id]')].map(e => e.dataset.id))]);
+    const ms = got.filter(id => nodeIds.has(id) && kind[id] !== 'root');
+    const regions = new Set(ms.map(regionOf).filter(Boolean));
+    if (regions.size >= 2 && ms.length >= 3) { pick = { w, ms, regions: regions.size }; break; }
+  }
+  await page.evaluate(() => document.activeElement?.blur());
+  if (!pick) {
+    check('z frames the Results matches', false, { error: 'no FIND word with matches in two regions', words });
+  } else {
+    const view = (await state()).view;
+    await waits(() => page.keyboard.press('z'));
+    const f = await focusState();
+    const box = await page.locator('#graph').boundingBox();
+    const pos = await page.evaluate(() => window.__oktPos);
+    const pts = pick.ms.map(id => pos[id]);
+    const pr = projectAll(f.view, pts.filter(Boolean), box.width, box.height);
+    const inside = pr.every(p => p.front && Math.abs(p.nx) <= 1 && Math.abs(p.ny) <= 1);
+    const extent = Math.max(0, ...pr.map(p => Math.max(Math.abs(p.nx), Math.abs(p.ny))));
+    const now = (await state()).view;
+    check('z frames the Results matches',
+      view === 'list' && now === 'graph' && f.scale === 'focus' && f.n === pick.ms.length && pts.every(Boolean) && inside && extent >= 0.6 && extent <= 0.8,
+      { word: pick.w, matches: pick.ms.length, regions: pick.regions, from: view, to: now, scale: f.scale, focusN: f.n, inside, extent: +extent.toFixed(3) });
+  }
 }
 
 // ---- LAYOUT ---------------------------------------------------------------------------------
