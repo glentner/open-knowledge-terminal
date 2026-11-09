@@ -38,13 +38,7 @@ output.
 The current run, in order. Each entry is one feature cycle. Re-ordered 2026-11-08: the graph
 rebuild is on ice (below), and the small cycles go first.
 
-### 2. Compact History
-
-History rows are two lines tall. Make them one line under the Log's day rules.
-
-**Seed:** [`issues/history-log-rows.md`](issues/history-log-rows.md)
-
-### 3. Pane arrangements
+### 2. Pane arrangements
 
 The view pane and the inspector are fixed left and right. Make panes placeable, swappable,
 stackable and collapsible, with saved arrangements, so a third view (the dream inbox, an agent chat)
@@ -66,7 +60,7 @@ A restart begins with concept art, with Geoffrey at every step.
 
 Small follow-ups found while the views run was being reviewed.
 
-### 5. Count cells sized in characters
+### 3. Count cells sized in characters
 
 The History and Log counts cells are sized in pixels for the default font, so a wider `--font` cuts
 their counts. Size them, and the thresholds derived from them, in `ch`.

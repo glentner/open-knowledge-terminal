@@ -11,9 +11,10 @@ appetite: big
 
 ## Problem
 
-okt's tests are the Rust unit tests, `tests/ui/keys.mjs` and `tests/ui/soak.mjs`. Nothing checks
-the JSON API, raw files, the watcher or the rendered panes end to end, so a regression there
-reaches the installed okt unseen, and the release gate is correspondingly thin.
+okt's tests are the Rust unit tests, `tests/ui/keys.mjs`, `tests/ui/history.mjs` and
+`tests/ui/soak.mjs`. Nothing checks the JSON API, raw files, the watcher or the rendered panes end
+to end, so a regression there reaches the installed okt unseen, and the release gate is
+correspondingly thin.
 
 ## Evidence
 
@@ -41,6 +42,9 @@ point:
 ## Non-goals (to negotiate)
 
 - Pixel diffs.
+
+## Notes
+
 - **Other-views geometry, noted 2026-11-08** (files-column-priority review cycle 2, F3): `tests/ui/keys.mjs`'s
   `VIEWS` table pins fixed tracks, gaps and padding of the Log, Table, Results and Paths rows, but
   content-sized and flexible tracks go unmeasured. Four mutants changed what renders and stayed
