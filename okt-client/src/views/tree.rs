@@ -180,7 +180,7 @@ pub fn render() {
     let (rows, hits) = tree_rows(&idx);
     let dirty = idx.dirty();
     let mut html = String::with_capacity(rows.len() * 600);
-    html.push_str("<div class=\"trow thead\"><span class=\"nm\">Name</span><span class=\"ti\">Title</span><span class=\"ty\">Type</span><span class=\"num\">Lines</span><span class=\"num\">Size</span><span class=\"age\">Changed</span><span class=\"st\"></span></div>");
+    html.push_str("<div class=\"tcols\"><div class=\"trow thead\"><span class=\"nm\">Name</span><span class=\"ti\">Title</span><span class=\"ty\">Type</span><span class=\"num lines\">Lines</span><span class=\"num size\">Size</span><span class=\"age\">Changed</span><span class=\"st\"></span></div>");
     for r in &rows {
         let n = idx.node(&r.id).unwrap();
         let ind = format!(
@@ -197,7 +197,8 @@ pub fn render() {
                 .map(|(t, c)| format!("{t} ×{}", num(*c)))
                 .collect();
             html.push_str(&format!(
-                "<div class=\"trow dir\" data-id=\"{}\"><span class=\"nm\">{ind}<span class=\"tw\">{}</span>{}<span class=\"t\">{}/</span></span><span class=\"ti\">{} files</span><span class=\"ty\">{}</span><span class=\"num\">{}</span><span class=\"num\"></span><span class=\"age\">{}</span><span class=\"st\"></span></div>",
+                "<div class=\"trow dir\" data-id=\"{}\"><span class=\"nm\" title=\"{}\">{ind}<span class=\"tw\">{}</span>{}<span class=\"t\">{}/</span></span><span class=\"ti\">{} files</span><span class=\"ty\">{}</span><span class=\"num lines\">{}</span><span class=\"num size\"></span><span class=\"age\">{}</span><span class=\"st\"></span></div>",
+                esc(&r.id),
                 esc(&r.id),
                 if r.open { "▾" } else { "▸" },
                 glyph(n),
@@ -215,9 +216,10 @@ pub fn render() {
             let d = dirty.get(&r.id).map(|s| s.as_str()).unwrap_or("");
             let age = fmt::ago(n.lt0());
             html.push_str(&format!(
-                "<div class=\"trow\" data-id=\"{}\"><span class=\"nm{}\">{ind}<span class=\"tw\"></span>{}<span class=\"t\">{}</span></span><span class=\"ti{}\">{}</span><span class=\"ty\">{}</span><span class=\"num\">{}</span><span class=\"num\">{}</span><span class=\"age\">{}</span><span class=\"st\" title=\"{}\">{}</span></div>",
+                "<div class=\"trow\" data-id=\"{}\"><span class=\"nm{}\" title=\"{}\">{ind}<span class=\"tw\"></span>{}<span class=\"t\">{}</span></span><span class=\"ti{}\">{}</span><span class=\"ty\">{}</span><span class=\"num lines\">{}</span><span class=\"num size\">{}</span><span class=\"age\">{}</span><span class=\"st\" title=\"{}\">{}</span></div>",
                 esc(&r.id),
                 if ti.is_empty() { " wide" } else { "" },
+                esc(&r.id),
                 glyph(n),
                 esc(&n.name),
                 if ti.is_empty() { " none" } else { "" },
@@ -231,6 +233,7 @@ pub fn render() {
             ));
         }
     }
+    html.push_str("</div>");
     let tree = dom::id("tree");
     let sel = state::sel();
     let ids: Vec<String> = rows.into_iter().map(|r| r.id).collect();
@@ -245,8 +248,9 @@ pub fn render() {
         dom::set_html(&tree, &html);
         tree.set_scroll_top(st);
     }
-    let kids = tree.children();
-    if let Some(sel) = &sel {
+    // the rows sit in the .tcols wrapper, the header first
+    let kids = tree.first_element_child().map(|w| w.children());
+    if let (Some(sel), Some(kids)) = (&sel, &kids) {
         if let Some(i) = ids.iter().position(|x| x == sel) {
             if let Some(el) = kids.item((i + 1) as u32) {
                 dom::add_class(&el, "on");

@@ -220,7 +220,22 @@ a { color: inherit; }
 
 /* ---------- files tree ---------- */
 .tree, .ltable, .tgrid, .list { flex: 1; overflow: auto; outline: 0; min-height: 0; }
-.trow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .9fr) 92px 56px 64px 60px 22px; gap: 10px; align-items: center; padding: 0 10px; height: 21px; cursor: pointer; white-space: nowrap; border-left: 2px solid transparent; }
+/* The Files table gives up columns as its pane narrows: Title first, then Lines, Size, Changed and
+   Type, so Name keeps room for a whole name; only then does a long name end in "…". The wrapper
+   .tcols is the query container, and its font-size carries the Name column's width at its cap:
+   60 characters of the rows' font (the one value to tune; in font-size, `ch` is the parent's
+   character) plus 35px, the top-level prefix before the Name text (the 10px twisty and 10px
+   glyph with the cell's three 5px gaps). So `1em` in each query below is that width. Only .trow
+   rows go in .tcols: the rows reset their font-size, and anything else would render at the
+   container's. Each query's offset restates the widths of the columns still shown beside Name:
+   the row's border and padding (22), the status column and its gap (32), then each column with
+   its 10px gap (Type 102, Changed 70, Size 74, Lines 66) and Title's 120px floor with its gap
+   (130). Change a column width and change its offsets, and the threshold table in
+   tests/ui/keys.mjs, in the same commit. */
+@property --name-w { syntax: '<length>'; inherits: true; initial-value: 0px; }
+.tcols { container: tcols / inline-size; font-size: calc(60ch + 35px); --name-w: 1em; }
+.tcols > .trow:not(.thead) { font-size: var(--fs); }
+.trow { display: grid; grid-template-columns: minmax(var(--name-w), 10fr) minmax(0, 9fr) 92px 56px 64px 60px 22px; gap: 10px; align-items: center; padding: 0 10px; height: 21px; cursor: pointer; white-space: nowrap; border-left: 2px solid transparent; }
 .trow:hover { background: var(--bg-3); }
 .trow.on { background: var(--sel); border-left-color: var(--accent); }
 .trow .nm { display: flex; align-items: center; gap: 5px; overflow: hidden; text-overflow: ellipsis; }
@@ -238,8 +253,30 @@ a { color: inherit; }
 .thead { position: sticky; top: 0; z-index: 2; background: var(--bg-2); color: var(--faint); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; cursor: default; border-bottom: 1px solid var(--line); }
 .thead:hover { background: var(--bg-2); }
 .trow.thead > span { color: var(--faint); font-weight: 400; }
+@container tcols (width < calc(1em + 496px)) {
+  .trow { grid-template-columns: minmax(0, 1fr) 92px 56px 64px 60px 22px; }
+  .trow .ti { display: none; }
+  .trow .nm.wide { grid-column: auto; }
+}
+@container tcols (width < calc(1em + 366px)) {
+  .trow { grid-template-columns: minmax(0, 1fr) 92px 64px 60px 22px; }
+  .trow .lines { display: none; }
+}
+@container tcols (width < calc(1em + 300px)) {
+  .trow { grid-template-columns: minmax(0, 1fr) 92px 60px 22px; }
+  .trow .size { display: none; }
+}
+@container tcols (width < calc(1em + 226px)) {
+  .trow { grid-template-columns: minmax(0, 1fr) 92px 22px; }
+  .trow .age { display: none; }
+}
+@container tcols (width < calc(1em + 156px)) {
+  .trow { grid-template-columns: minmax(0, 1fr) 22px; }
+  .trow .ty { display: none; }
+}
 
 /* ---------- log ---------- */
+/* Its row tracks are pinned in tests/ui/keys.mjs (AGENTS.md § Conventions). */
 .lchart { flex: none; height: 92px; border-bottom: 1px solid var(--line); position: relative; }
 .lchart svg { width: 100%; height: 100%; display: block; }
 .lchart .bar { fill: var(--accent); opacity: .85; }
@@ -267,6 +304,7 @@ a { color: inherit; }
 .dayrule { position: sticky; top: 0; padding: 2px 10px; background: var(--bg-3); color: var(--accent-text); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; border-bottom: 1px solid var(--line); z-index: 1; }
 
 /* ---------- table (screener) ---------- */
+/* Its row tracks are pinned in tests/ui/keys.mjs (AGENTS.md § Conventions). */
 .tfold { color: var(--ink); }
 .tgrid table { border-collapse: separate; border-spacing: 0; min-width: 100%; font-variant-numeric: tabular-nums; }
 .tgrid th { position: sticky; top: 0; z-index: 2; background: var(--bg-2); color: var(--dim); font-weight: 500; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; text-align: left; padding: 4px 10px; border-bottom: 1px solid var(--line-2); white-space: nowrap; cursor: pointer; user-select: none; }
@@ -284,6 +322,7 @@ a { color: inherit; }
 .tcolpick { flex: none; display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--line); max-height: 140px; overflow: auto; }
 
 /* ---------- list (results) ---------- */
+/* Its row tracks are pinned in tests/ui/keys.mjs (AGENTS.md § Conventions). */
 .lgroup { border-bottom: 1px solid var(--line); }
 .lgh { display: flex; gap: 10px; align-items: baseline; padding: 4px 10px; background: var(--bg-2); position: sticky; top: 0; z-index: 1; cursor: pointer; }
 .lgh .p { color: var(--ink); }
@@ -555,9 +594,6 @@ a { color: inherit; }
   .insp { border-top: 1px solid var(--line-2); }
   .glegend { display: none; }
   .word, .kbname, .crumbs { display: none; }
-  .trow { grid-template-columns: minmax(0, 1fr) 72px 50px 40px 14px; gap: 8px; }
-  .trow .ti, .trow .num:nth-of-type(4) { display: none; }
-  .trow .nm.wide { grid-column: auto; }
 }
 
 /* ---------- installable app: waiting screen and connection banner ---------- */

@@ -12,9 +12,13 @@ cargo test -p okt-server -p okt-pygments -p okt-client
 ```
 
 Browser suites run against a server, normally the throwaway one (`tests/env.sh`, § Factory):
-`tests/ui/keys.mjs` covers the navigation keys (README § Keys); `tests/ui/soak.mjs` checks that
-memory and listeners plateau on a page left open; `tests/perf/profile.mjs` measures main-thread
-cost and frame pacing, and `tests/perf/compare.py` compares two runs. They need Playwright (`npm install` in `tests/`).
+`tests/ui/keys.mjs` covers the navigation keys (README § Keys), then the Files columns: the table
+giving up columns by priority as its pane narrows, the Name cell's hover path, and the row geometry
+of the Log, Table, Results and Paths views. That section writes fixtures into `$OKT_KB`, the
+throwaway clone, so it runs only under `tests/env.sh` and prints a skip line anywhere else.
+`tests/ui/soak.mjs` checks that memory and listeners plateau on a page left open;
+`tests/perf/profile.mjs` measures main-thread cost and frame pacing, and `tests/perf/compare.py`
+compares two runs. They need Playwright (`npm install` in `tests/`).
 
 ## Map
 
@@ -164,6 +168,11 @@ never remove the old entry. Skills and templates cite this list and never copy i
   `build`, `docs`, `vendor`). No trailers. Never push without being asked.
 - `okt-client/static/app.css` and `okt-client/src/graph.rs` change together: the graph rules in
   the stylesheet are the spec `graph.rs` paints from.
+- The Files table's column widths (`.trow` in `okt-client/static/app.css`), the `@container tcols`
+  offsets and the threshold table in `tests/ui/keys.mjs` change together: the comment above
+  `.tcols` in `app.css` says how they derive from each other.
+- The row tracks of the other views in `app.css` (`.crow`, `.lrow`, `.lsimple`, the `.tgrid`
+  cells) and their pinned rows in `tests/ui/keys.mjs` (`VIEWS`) change together.
 - The version lives only at the release recipe's `version.source`; the recipe's `gate` is the full pre-release check (there is no CI).
 - No spec R#/P# ids in source code.
 - Point to a rule; don't restate it. A rule restated in N places is a same-commit obligation in

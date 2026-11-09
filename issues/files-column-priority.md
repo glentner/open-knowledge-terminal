@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:files-column-priority
 kind: feature
 appetite: small
 ---

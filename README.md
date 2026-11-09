@@ -51,20 +51,25 @@ Useful flags: `--theme terminal|dark|light`, `--accent '#ffa028'`, `--font "Berk
 | `okt-pygments/` | Syntax highlighting that reproduces Pygments' HTML output exactly (lexer tables exported from Pygments by `tools/pygments/export.py`, run by a Rust port of Pygments' lexer engine). |
 | `vendor/markdown-it/` | markdown-it 0.6.1 with one fix (emphasis source maps across stripped line prefixes); see `Cargo.toml` `[patch.crates-io]`. |
 | `tests/env.sh` | A throwaway okt server on 6581 over a fresh clone of the KB, to run the browser tests against. |
-| `tests/ui/` | Browser tests: the navigation keys (see Keys), and a soak test for a page left open all day. |
+| `tests/ui/` | Browser tests: the navigation keys (see Keys) and the Files columns, and a soak test for a page left open all day. |
 | `tests/perf/` | Main-thread cost and frame pacing of a fixed set of interactions, compared across two builds. |
 
 ## Tests
 
 ```sh
 make test                                                   # unit tests
-tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/keys.mjs"'     # the navigation keys
+tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/keys.mjs"'     # the navigation keys, the Files columns
 tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/soak.mjs" "$OKT_KB" "$OKT"'
 ```
 
 `tests/env.sh` builds the current tree and serves a fresh clone of the KB on 6581, so the real KB
 and the okt on 6580 are never touched. The browser tests need Playwright (`npm install` in
 `tests/`).
+
+`keys.mjs` checks the navigation keys, then the Files columns: the table giving up columns by
+priority as its pane narrows, the full path on hover over a Name, and the row geometry of the Log,
+Table, Results and Paths views. The Files columns section writes fixture files into the KB it
+serves (`$OKT_KB`), so it runs only under `tests/env.sh`; anywhere else it prints a skip line.
 
 End-to-end tests of the JSON API, raw files, the watcher and the rendered panes are not written
 yet; `ROADMAP.md` tracks them.

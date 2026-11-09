@@ -41,3 +41,9 @@ point:
 ## Non-goals (to negotiate)
 
 - Pixel diffs.
+- **Other-views geometry, noted 2026-11-08** (files-column-priority review cycle 2, F3): `tests/ui/keys.mjs`'s
+  `VIEWS` table pins fixed tracks, gaps and padding of the Log, Table, Results and Paths rows, but
+  content-sized and flexible tracks go unmeasured. Four mutants changed what renders and stayed
+  green: the Log date track `max-content` → `1fr`, the Paths path flex, the Results row padding, and
+  the Table cell max-width. A regression suite should grade content-sized cells as
+  min(content, available) and pin row heights.
