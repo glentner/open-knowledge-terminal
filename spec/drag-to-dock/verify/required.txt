@@ -1,0 +1,10 @@
+# Native tests (cargo test -p okt-client -- --exact) each phase requires, as "P<n>|<path>".
+# PLAN § 2.6 says what each one sweeps and the domain size it asserts.
+P1|arrange::tests::layout_tiles_the_root
+P1|arrange::tests::aim_finds_the_pane_and_zone_under_a_point
+P1|arrange::tests::dock_matches_the_hand_worked_cases
+P1|arrange::tests::dock_sweep_matches_the_written_rules
+P1|arrange::tests::refused_dock_changes_nothing
+P1|arrange::tests::dock_preview_is_the_rect_the_view_lands_in
+P1|arrange::tests::centre_dock_on_the_neighbour_equals_the_move_keys
+P1|arrange::tests::docked_trees_survive_save_and_load

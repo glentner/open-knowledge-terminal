@@ -875,6 +875,285 @@ pub fn drag(root: &mut Node, path: &[usize], want: f64, extent: f64) -> Option<f
     Some(g)
 }
 
+// ---- docking a dragged view --------------------------------------------------------------------
+
+/// A pane's rect in px, from the root's top left.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+impl Rect {
+    /// Holds the point, its left and top edges included and its right and bottom ones not.
+    fn holds(self, x: f64, y: f64) -> bool {
+        x >= self.x && x < self.x + self.w && y >= self.y && y < self.y + self.h
+    }
+}
+
+/// Each pane's rect in a `w` × `h` root, in reading order, as the drawing tiles it: a split's
+/// first child takes `f` of its extent and the second the rest, or a collapsed child takes the
+/// title bar's extent and its sibling the rest.
+pub fn layout(root: &Node, w: f64, h: f64) -> Vec<(PaneId, Rect)> {
+    fn tile(n: &Node, x: f64, y: f64, w: f64, h: f64, out: &mut Vec<(PaneId, Rect)>) {
+        let folded = |k: &Node| matches!(k, Node::Pane(p) if p.collapsed);
+        match n {
+            Node::Pane(p) => out.push((p.id, Rect { x, y, w, h })),
+            Node::Split { orient, f, kids } => {
+                let e = if *orient == Orient::Row { w } else { h };
+                let lead = if folded(&kids[0]) {
+                    TITLE
+                } else if folded(&kids[1]) {
+                    e - TITLE
+                } else {
+                    f * e
+                };
+                if *orient == Orient::Row {
+                    tile(&kids[0], x, y, lead, h, out);
+                    tile(&kids[1], x + lead, y, w - lead, h, out);
+                } else {
+                    tile(&kids[0], x, y, w, lead, out);
+                    tile(&kids[1], x, y + lead, w, h - lead, out);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    tile(root, 0.0, 0.0, w, h, &mut out);
+    out
+}
+
+/// Where in a pane a dragged view lands: joining it as a tab, or splitting it on a side.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Zone {
+    Centre,
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+impl Zone {
+    #[cfg(test)]
+    pub const ALL: [Zone; 5] = [Zone::Centre, Zone::Left, Zone::Right, Zone::Top, Zone::Bottom];
+}
+
+/// An edge zone's depth, as a share of the pane body's width or height.
+const BAND: f64 = 0.25;
+
+/// The zone of the pane at `r` under the point. A collapsed pane, and any pane's title bar, is all
+/// centre. In the body below the title bar, a point within a quarter of the body's width of its
+/// left or right side, or a quarter of its height of its top or bottom, is that edge's zone (the
+/// nearest by share where two bands meet, ties going left, right, top, bottom); the rest is the
+/// centre.
+pub fn zone_at(r: Rect, collapsed: bool, x: f64, y: f64) -> Zone {
+    if collapsed || y < r.y + TITLE || r.h - TITLE <= 0.0 || r.w <= 0.0 {
+        return Zone::Centre;
+    }
+    let (by, bh) = (r.y + TITLE, r.h - TITLE);
+    let shares = [
+        (Zone::Left, (x - r.x) / r.w),
+        (Zone::Right, (r.x + r.w - x) / r.w),
+        (Zone::Top, (y - by) / bh),
+        (Zone::Bottom, (by + bh - y) / bh),
+    ];
+    let mut best = (Zone::Centre, BAND);
+    for (z, s) in shares {
+        if s < best.1 {
+            best = (z, s);
+        }
+    }
+    best.0
+}
+
+/// The pane under a point given relative to the root's top left, and its zone; `None` outside
+/// the root.
+pub fn aim(root: &Node, w: f64, h: f64, x: f64, y: f64) -> Option<(PaneId, Zone)> {
+    let mut r = Rect { x: 0.0, y: 0.0, w, h };
+    if !r.holds(x, y) {
+        return None;
+    }
+    // down the splits as `layout` tiles them, into the child whose side of the cut holds the point
+    let folded = |k: &Node| matches!(k, Node::Pane(p) if p.collapsed);
+    let mut n = root;
+    loop {
+        match n {
+            Node::Pane(p) => return Some((p.id, zone_at(r, p.collapsed, x, y))),
+            Node::Split { orient, f, kids } => {
+                let row = *orient == Orient::Row;
+                let e = if row { r.w } else { r.h };
+                let lead = if folded(&kids[0]) {
+                    TITLE
+                } else if folded(&kids[1]) {
+                    e - TITLE
+                } else {
+                    f * e
+                };
+                let first = if row { x < r.x + lead } else { y < r.y + lead };
+                r = match (row, first) {
+                    (true, true) => Rect { w: lead, ..r },
+                    (true, false) => Rect { x: r.x + lead, w: r.w - lead, ..r },
+                    (false, true) => Rect { h: lead, ..r },
+                    (false, false) => Rect { y: r.y + lead, h: r.h - lead, ..r },
+                };
+                n = &kids[if first { 0 } else { 1 }];
+            }
+        }
+    }
+}
+
+/// The tree after view `v` is dropped on `zone` of pane `target` in a `w` × `h` root, and the id
+/// of the pane holding `v` there; `None` when the zone is invalid, so a release there changes
+/// nothing. The view leaves its pane, which shows the view after it (the first, after the last)
+/// if it showed `v`. On the centre it joins `target` as its last tab, shown, the pane expanded; on
+/// an edge `target` splits half and half on that side, a new pane holding only `v` taking the
+/// side. A pane left empty closes, its sibling taking its space. Invalid: its own pane's centre, a
+/// collapsed pane's edges, any zone of its own pane when that holds only `v`, and any drop whose
+/// result breaks the arrangement's rules (an empty pane, a view held twice or lost, two collapsed
+/// panes in one split, a collapsed root) or, on an edge, leaves the new pane or `target` under the
+/// floor across (left, right) or down (top, bottom) in the result's layout.
+pub fn docked(
+    root: &Node,
+    v: View,
+    target: PaneId,
+    zone: Zone,
+    w: f64,
+    h: f64,
+) -> Option<(Node, PaneId)> {
+    let src = holder(root, v)?;
+    let onto = find(root, target)?;
+    if zone == Zone::Centre && src == target {
+        return None;
+    }
+    if zone != Zone::Centre && onto.collapsed {
+        return None;
+    }
+    if src == target && onto.views.len() == 1 {
+        return None;
+    }
+    let mut n = root.clone();
+    // the view leaves its pane
+    let p = find_mut(&mut n, src)?;
+    let at = p.views.iter().position(|x| *x == v)?;
+    p.views.remove(at);
+    let emptied = p.views.is_empty();
+    if !emptied && p.shown == v {
+        // the view after it, or the first when it was the last
+        p.shown = p.views[if at < p.views.len() { at } else { 0 }];
+    }
+    let lands = if zone == Zone::Centre {
+        let q = find_mut(&mut n, target)?;
+        q.views.push(v);
+        q.shown = v;
+        q.collapsed = false;
+        target
+    } else {
+        // ids are never renumbered, so the count could name a pane that is still there
+        let id = panes(&n).iter().map(|p| p.id).max().unwrap_or(0) + 1;
+        let path = path_of(&n, target)?;
+        let slot = at_mut(&mut n, &path)?;
+        let made = Node::Pane(Pane {
+            id,
+            views: vec![v],
+            shown: v,
+            collapsed: false,
+        });
+        let old = slot.clone();
+        let orient = if matches!(zone, Zone::Left | Zone::Right) {
+            Orient::Row
+        } else {
+            Orient::Col
+        };
+        *slot = if matches!(zone, Zone::Left | Zone::Top) {
+            split(orient, 0.5, made, old)
+        } else {
+            split(orient, 0.5, old, made)
+        };
+        id
+    };
+    if emptied {
+        let path = path_of(&n, src)?;
+        if path.is_empty() {
+            return None;
+        }
+        lift(&mut n, &path);
+    }
+    if !keeps_the_rules(&n, root) {
+        return None;
+    }
+    if zone != Zone::Centre {
+        let rs = layout(&n, w, h);
+        let across = matches!(zone, Zone::Left | Zone::Right);
+        for id in [lands, target] {
+            let (_, r) = rs.iter().find(|(p, _)| *p == id)?;
+            let fits = if across { r.w >= MIN_W } else { r.h >= MIN_H };
+            if !fits {
+                return None;
+            }
+        }
+    }
+    Some((n, lands))
+}
+
+/// `n` holds exactly the views `before` held, each once, in panes that are none of them empty and
+/// each show a view they hold; no split holds two collapsed panes, and the root isn't collapsed.
+fn keeps_the_rules(n: &Node, before: &Node) -> bool {
+    fn folds(n: &Node) -> bool {
+        match n {
+            Node::Pane(_) => false,
+            Node::Split { kids, .. } => {
+                matches!(&**kids, [Node::Pane(a), Node::Pane(b)] if a.collapsed && b.collapsed)
+                    || kids.iter().any(folds)
+            }
+        }
+    }
+    let held = |n: &Node| {
+        let mut vs: Vec<usize> = panes(n)
+            .iter()
+            .flat_map(|p| p.views.iter().map(|v| *v as usize))
+            .collect();
+        vs.sort_unstable();
+        vs
+    };
+    let after = held(n);
+    !matches!(n, Node::Pane(p) if p.collapsed)
+        && !folds(n)
+        && panes(n)
+            .iter()
+            .all(|p| !p.views.is_empty() && p.views.contains(&p.shown))
+        && after.windows(2).all(|x| x[0] != x[1])
+        && after == held(before)
+}
+
+/// Drop view `v` on `zone` of pane `target`, as [`docked`] says: the tree is replaced whole, and
+/// focus goes to the pane holding `v`. An invalid zone changes nothing and says nothing: no
+/// outline showed there.
+pub fn dock(root: &mut Node, v: View, target: PaneId, zone: Zone, w: f64, h: f64) -> Outcome {
+    match docked(root, v, target, zone, w, h) {
+        Some((n, id)) => {
+            *root = n;
+            Outcome {
+                changed: true,
+                focus: Some(id),
+                toast: None,
+            }
+        }
+        None => Outcome::default(),
+    }
+}
+
+/// The rect the pane holding `v` takes after the drop [`docked`] makes, in the same root: what the
+/// outline shows while the drag is over that zone. `None` where the zone is invalid.
+pub fn preview(root: &Node, v: View, target: PaneId, zone: Zone, w: f64, h: f64) -> Option<Rect> {
+    let (n, id) = docked(root, v, target, zone, w, h)?;
+    layout(&n, w, h)
+        .into_iter()
+        .find(|(p, _)| *p == id)
+        .map(|(_, r)| r)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1059,37 +1338,12 @@ mod tests {
         assert!(!panes(&m)[0].collapsed);
     }
 
-    /// Each pane's rect `[x, y, w, h]` in a `w` × `h` root, as the drawing tiles it: a split's
-    /// children take `f` and `1 − f` of its extent, or the title bar and the rest beside a
-    /// collapsed pane.
-    fn rects(n: &Node, x: f64, y: f64, w: f64, h: f64, out: &mut Vec<[f64; 4]>) {
-        let folded = |k: &Node| matches!(k, Node::Pane(p) if p.collapsed);
-        match n {
-            Node::Pane(_) => out.push([x, y, w, h]),
-            Node::Split { orient, f, kids } => {
-                let e = if *orient == Orient::Row { w } else { h };
-                let lead = if folded(&kids[0]) {
-                    TITLE
-                } else if folded(&kids[1]) {
-                    e - TITLE
-                } else {
-                    f * e
-                };
-                if *orient == Orient::Row {
-                    rects(&kids[0], x, y, lead, h, out);
-                    rects(&kids[1], x + lead, y, w - lead, h, out);
-                } else {
-                    rects(&kids[0], x, y, w, lead, out);
-                    rects(&kids[1], x, y + lead, w, h - lead, out);
-                }
-            }
-        }
-    }
-
-    fn layout(n: &Node, w: f64, h: f64) -> Vec<[f64; 4]> {
-        let mut out = Vec::new();
-        rects(n, 0.0, 0.0, w, h, &mut out);
-        out
+    /// Each pane's rect as `[x, y, w, h]`, in reading order ([`layout`]).
+    fn boxes(n: &Node, w: f64, h: f64) -> Vec<[f64; 4]> {
+        layout(n, w, h)
+            .into_iter()
+            .map(|(_, r)| [r.x, r.y, r.w, r.h])
+            .collect()
     }
 
     fn collapsed(n: &Node) -> Vec<bool> {
@@ -1133,16 +1387,18 @@ mod tests {
         assert_eq!(which(&c, 0.54), None);
     }
 
-    #[test]
-    fn preset_sizes_match_the_plan() {
-        let close = |a: &[[f64; 4]], b: &[[f64; 4]]| {
-            a.len() == b.len()
-                && a.iter()
-                    .zip(b)
-                    .all(|(x, y)| x.iter().zip(y).all(|(u, v)| (u - v).abs() < 1e-6))
-        };
+    /// The same rects, to a millionth of a px.
+    fn near(a: &[[f64; 4]], b: &[[f64; 4]]) -> bool {
+        a.len() == b.len()
+            && a.iter()
+                .zip(b)
+                .all(|(x, y)| x.iter().zip(y).all(|(u, v)| (u - v).abs() < 1e-6))
+    }
+
+    /// The presets' rects at both widths in an 890 px root, as the pane arrangements plan sized them.
+    fn preset_rects() -> [(Preset, f64, Vec<[f64; 4]>); 8] {
         let h = 890.0;
-        let cases: [(Preset, f64, Vec<[f64; 4]>); 8] = [
+        [
             (Preset::Classic, 1600.0, vec![[0.0, 0.0, 864.0, h], [864.0, 0.0, 736.0, h]]),
             (Preset::Swapped, 1600.0, vec![[0.0, 0.0, 736.0, h], [736.0, 0.0, 864.0, h]]),
             (Preset::Stacked, 1600.0, vec![[0.0, 0.0, 1600.0, 445.0], [0.0, 445.0, 1600.0, 445.0]]),
@@ -1159,16 +1415,21 @@ mod tests {
                 900.0,
                 vec![[0.0, 0.0, 900.0, 24.0], [0.0, 24.0, 450.0, 866.0], [450.0, 24.0, 450.0, 866.0]],
             ),
-        ];
-        for (p, w, want) in cases {
-            let got = layout(&p.tree(0.54), w, h);
-            assert!(close(&got, &want), "{p:?} at {w}: {got:?}");
+        ]
+    }
+
+    #[test]
+    fn preset_sizes_match_the_plan() {
+        let h = 890.0;
+        for (p, w, want) in preset_rects() {
+            let got = boxes(&p.tree(0.54), w, h);
+            assert!(near(&got, &want), "{p:?} at {w}: {got:?}");
         }
         // classic by key takes a legacy share; three's Graph expanded takes 40% of the height
-        assert!(close(&layout(&Preset::Classic.tree(classic_share(30.0)), 1600.0, h)[..1], &[[0.0, 0.0, 1120.0, h]]));
+        assert!(near(&boxes(&Preset::Classic.tree(classic_share(30.0)), 1600.0, h)[..1], &[[0.0, 0.0, 1120.0, h]]));
         let mut t = three();
         place(&mut t, View::Graph, 3, true);
-        assert!(close(&layout(&t, 1600.0, 1000.0)[..1], &[[0.0, 0.0, 1600.0, 400.0]]));
+        assert!(near(&boxes(&t, 1600.0, 1000.0)[..1], &[[0.0, 0.0, 1600.0, 400.0]]));
     }
 
     #[test]
@@ -1178,13 +1439,13 @@ mod tests {
         assert!(o.changed);
         assert_eq!(collapsed(&n), vec![true, false]);
         assert_eq!(share(&n, &[]), Some(0.54), "the share is kept");
-        assert!((layout(&n, 1600.0, 890.0)[1][2] - (1600.0 - TITLE)).abs() < 1e-9);
+        assert!((boxes(&n, 1600.0, 890.0)[1][2] - (1600.0 - TITLE)).abs() < 1e-9);
         collapse_toggle(&mut n, 1);
         assert_eq!(n, classic(0.54), "expand gives back what collapse changed");
         // in a stack: the title bar, then back
         let mut s = stacked();
         collapse_toggle(&mut s, 2);
-        assert_eq!(layout(&s, 900.0, 890.0)[1], [0.0, 890.0 - TITLE, 900.0, TITLE]);
+        assert_eq!(boxes(&s, 900.0, 890.0)[1], [0.0, 890.0 - TITLE, 900.0, TITLE]);
         collapse_toggle(&mut s, 2);
         assert_eq!(s, stacked());
         // a collapsed side's sash is inert
@@ -1282,7 +1543,7 @@ mod tests {
         place(&mut t, View::Graph, 3, true);
         let trees = [classic(0.54), stacked(), t.clone(), nested.clone()];
         for n in &trees {
-            let rs = layout(n, 1600.0, 890.0);
+            let rs = boxes(n, 1600.0, 890.0);
             let ids: Vec<PaneId> = panes(n).iter().map(|p| p.id).collect();
             for (k, &id) in ids.iter().enumerate() {
                 for dir in [Dir::Next, Dir::Prev] {
@@ -1378,7 +1639,7 @@ mod tests {
         assert_eq!(close(&mut t, 2, Dir::Next).focus, Some(3));
         assert_eq!(shape(&t), "[(1:graph)|(3:files,log,table,list,insp)]");
         assert_eq!(pane_of(&t, View::Insp).shown, View::Insp);
-        assert_eq!(layout(&t, 1600.0, 890.0)[1], [0.0, TITLE, 1600.0, 890.0 - TITLE]);
+        assert_eq!(boxes(&t, 1600.0, 890.0)[1], [0.0, TITLE, 1600.0, 890.0 - TITLE]);
         // closing the collapsed Graph: the Inspector takes it, expanded, and the row takes the height
         let mut t = three();
         assert_eq!(close(&mut t, 1, Dir::Next).focus, Some(2));
@@ -1451,5 +1712,657 @@ mod tests {
         assert!(o.changed && o.focus.is_none());
         assert_eq!(pane_views(&m), vec![vec!["graph"], vec!["files", "insp"]]);
         assert_eq!(panes(&m)[1].shown, View::Insp);
+    }
+
+    // ---- docking a dragged view ----------------------------------------------------------------
+
+    /// The roots the drop sweeps run in: the page's panes at both preset widths, and two small
+    /// windows where the floors refuse most edges.
+    const SIZES: [(f64, f64); 4] = [(1600.0, 918.0), (900.0, 918.0), (640.0, 300.0), (430.0, 250.0)];
+
+    fn shut(views: &[View], shown: View) -> Node {
+        Node::Pane(Pane {
+            id: 0,
+            views: views.to_vec(),
+            shown,
+            collapsed: true,
+        })
+    }
+
+    /// Every split tree of `n` empty panes: each shape, each split side by side or stacked, at
+    /// share 0.5 or 0.3.
+    fn frames(n: usize) -> Vec<Node> {
+        if n == 1 {
+            return vec![leaf(&[], View::Graph)];
+        }
+        let mut out = Vec::new();
+        for k in 1..n {
+            for a in frames(k) {
+                for b in frames(n - k) {
+                    for orient in [Orient::Row, Orient::Col] {
+                        for f in [0.5, 0.3] {
+                            out.push(split(orient, f, a.clone(), b.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn fill(n: &mut Node, f: &mut impl FnMut(&mut Pane)) {
+        match n {
+            Node::Pane(p) => f(p),
+            Node::Split { kids, .. } => {
+                for k in kids.iter_mut() {
+                    fill(k, f);
+                }
+            }
+        }
+    }
+
+    /// The accordion's rules: no split holds two collapsed panes, and the root isn't collapsed.
+    fn folded_well(n: &Node) -> bool {
+        fn inner(n: &Node) -> bool {
+            match n {
+                Node::Pane(_) => true,
+                Node::Split { kids, .. } => {
+                    let [a, b] = &**kids;
+                    let shut = |k: &Node| matches!(k, Node::Pane(p) if p.collapsed);
+                    !(shut(a) && shut(b)) && inner(a) && inner(b)
+                }
+            }
+        }
+        !matches!(n, Node::Pane(p) if p.collapsed) && inner(n)
+    }
+
+    /// The ways to deal the six views in order to `n` panes, one or two to a pane, each pane
+    /// showing either of its views: bit `i` of the first number gives pane `i` a second view, of
+    /// the second number shows it.
+    fn deals(n: usize) -> Vec<(u32, u32)> {
+        let mut out = Vec::new();
+        for two in 0..1u32 << n {
+            if n + two.count_ones() as usize > View::ALL.len() {
+                continue;
+            }
+            for second in 0..1u32 << n {
+                if second & !two == 0 {
+                    out.push((two, second));
+                }
+            }
+        }
+        out
+    }
+
+    /// `frame` dealt `(two, second)`, with the panes in bit set `folded` collapsed. Ids go up in
+    /// reading order with gaps, as they stand after a pane closes, so a new pane's id is held to
+    /// the largest, not the count.
+    fn dealt(frame: &Node, (two, second): (u32, u32), folded: u32) -> Node {
+        let mut t = frame.clone();
+        let (mut i, mut next) = (0u32, 0usize);
+        fill(&mut t, &mut |p| {
+            let k = 1 + (two >> i & 1) as usize;
+            p.views = View::ALL[next..next + k].to_vec();
+            p.shown = p.views[(second >> i & 1) as usize];
+            p.collapsed = folded >> i & 1 == 1;
+            p.id = 2 * i + 1;
+            next += k;
+            i += 1;
+        });
+        t
+    }
+
+    /// Each frame of one to four panes, collapsed every way that keeps the accordion's rules,
+    /// with `pick` choosing its dealings from [`deals`] (given the count of geometries so far).
+    fn arrangements(pick: impl Fn(usize, &[(u32, u32)], usize) -> Vec<(u32, u32)>) -> Vec<Node> {
+        let mut out = Vec::new();
+        let mut k = 0;
+        for n in 1..=4usize {
+            let ds = deals(n);
+            for frame in frames(n) {
+                for folded in 0..1u32 << n {
+                    if !folded_well(&dealt(&frame, (0, 0), folded)) {
+                        continue;
+                    }
+                    for d in pick(n, &ds, k) {
+                        out.push(dealt(&frame, d, folded));
+                    }
+                    k += 1;
+                }
+            }
+        }
+        out
+    }
+
+    /// Every geometry: each frame of one to four panes, collapsed every way the rules allow, each
+    /// pane holding one view.
+    fn geometries() -> &'static [Node] {
+        static ALL: std::sync::OnceLock<Vec<Node>> = std::sync::OnceLock::new();
+        ALL.get_or_init(|| arrangements(|_, _, _| vec![(0, 0)]))
+    }
+
+    /// Every arrangement the sweeps start from: each geometry of up to three panes with every
+    /// dealing; each geometry of four panes with one dealing, taken in turn, so each dealing meets
+    /// many four-pane geometries.
+    fn domain() -> &'static [Node] {
+        static ALL: std::sync::OnceLock<Vec<Node>> = std::sync::OnceLock::new();
+        ALL.get_or_init(|| {
+            arrangements(|n, ds, k| if n < 4 { ds.to_vec() } else { vec![ds[k % ds.len()]] })
+        })
+    }
+
+    /// Every drop the sweeps grade: each arrangement in [`domain`] × each view × each pane × each
+    /// zone × each size. Returns the count.
+    fn sweep(mut f: impl FnMut(&Node, View, PaneId, Zone, f64, f64)) -> usize {
+        let mut n = 0;
+        for t in domain() {
+            let ids: Vec<PaneId> = panes(t).iter().map(|p| p.id).collect();
+            for v in View::ALL {
+                for &id in &ids {
+                    for z in Zone::ALL {
+                        for (w, h) in SIZES {
+                            f(t, v, id, z, w, h);
+                            n += 1;
+                        }
+                    }
+                }
+            }
+        }
+        n
+    }
+
+    /// Pane `id`'s rect `[x, y, w, h]` in a `w` × `h` root, found by walking down to it.
+    fn rect_of(n: &Node, id: PaneId, x: f64, y: f64, w: f64, h: f64) -> Option<[f64; 4]> {
+        match n {
+            Node::Pane(p) => (p.id == id).then_some([x, y, w, h]),
+            Node::Split { orient, f, kids } => {
+                let shut = |k: &Node| matches!(k, Node::Pane(p) if p.collapsed);
+                let row = *orient == Orient::Row;
+                let e = if row { w } else { h };
+                let a = if shut(&kids[0]) {
+                    TITLE
+                } else if shut(&kids[1]) {
+                    e - TITLE
+                } else {
+                    f * e
+                };
+                if row {
+                    rect_of(&kids[0], id, x, y, a, h).or_else(|| rect_of(&kids[1], id, x + a, y, w - a, h))
+                } else {
+                    rect_of(&kids[0], id, x, y, w, a).or_else(|| rect_of(&kids[1], id, x, y + a, w, h - a))
+                }
+            }
+        }
+    }
+
+    /// The arrangement's rules after a drop: each pane holds a view and shows one it holds, every
+    /// view held before is held once and no other is, and the accordion's rules hold.
+    fn lawful(n: &Node, before: &Node) -> bool {
+        let names = |n: &Node| {
+            let mut vs: Vec<&str> = panes(n)
+                .iter()
+                .flat_map(|p| p.views.iter().map(|v| v.name()))
+                .collect();
+            vs.sort_unstable();
+            vs
+        };
+        let vs = names(n);
+        let mut once = vs.clone();
+        once.dedup();
+        folded_well(n)
+            && once.len() == vs.len()
+            && vs == names(before)
+            && panes(n)
+                .iter()
+                .all(|p| !p.views.is_empty() && p.views.contains(&p.shown))
+    }
+
+    /// The drop as the goal words it, read apart from `docked`: the tree is rebuilt pane by pane,
+    /// the source losing the view and the target joining it or splitting round it, and a pane left
+    /// empty folds into its parent; then the rules and the floors are read on the result.
+    fn written(root: &Node, v: View, target: PaneId, zone: Zone, w: f64, h: f64) -> Option<(Node, PaneId)> {
+        fn redo(n: &Node, v: View, source: PaneId, target: PaneId, zone: Zone, made: &Node) -> Option<Node> {
+            match n {
+                Node::Pane(p) => {
+                    let mut q = p.clone();
+                    if q.id == source {
+                        let i = q.views.iter().position(|x| *x == v)?;
+                        q.views.remove(i);
+                        if q.shown == v && !q.views.is_empty() {
+                            q.shown = q.views[i % q.views.len()];
+                        }
+                    }
+                    if q.id == target {
+                        let (first, second) = (made.clone(), Node::Pane(q.clone()));
+                        match zone {
+                            Zone::Centre => {
+                                q.views.push(v);
+                                q.shown = v;
+                                q.collapsed = false;
+                            }
+                            Zone::Left => return Some(split(Orient::Row, 0.5, first, second)),
+                            Zone::Right => return Some(split(Orient::Row, 0.5, second, first)),
+                            Zone::Top => return Some(split(Orient::Col, 0.5, first, second)),
+                            Zone::Bottom => return Some(split(Orient::Col, 0.5, second, first)),
+                        }
+                    }
+                    (!q.views.is_empty()).then_some(Node::Pane(q))
+                }
+                Node::Split { orient, f, kids } => {
+                    let a = redo(&kids[0], v, source, target, zone, made);
+                    let b = redo(&kids[1], v, source, target, zone, made);
+                    match (a, b) {
+                        (Some(a), Some(b)) => Some(split(*orient, *f, a, b)),
+                        (a, b) => a.or(b),
+                    }
+                }
+            }
+        }
+        let all = panes(root);
+        let from = all.iter().find(|p| p.views.contains(&v))?;
+        let onto = all.iter().find(|p| p.id == target)?;
+        let centre = zone == Zone::Centre;
+        // no move onto its own pane's centre; a collapsed pane offers only its centre; a pane
+        // holding only the dragged view has nothing to split from
+        if from.id == onto.id && (centre || from.views.len() == 1) || !centre && onto.collapsed {
+            return None;
+        }
+        let fresh = all.iter().map(|p| p.id).max()? + 1;
+        let made = Node::Pane(Pane {
+            id: fresh,
+            views: vec![v],
+            shown: v,
+            collapsed: false,
+        });
+        let out = redo(root, v, from.id, target, zone, &made)?;
+        if !lawful(&out, root) {
+            return None;
+        }
+        let lands = if centre { target } else { fresh };
+        if !centre {
+            let across = matches!(zone, Zone::Left | Zone::Right);
+            for id in [lands, target] {
+                let r = rect_of(&out, id, 0.0, 0.0, w, h)?;
+                if across && r[2] < MIN_W || !across && r[3] < MIN_H {
+                    return None;
+                }
+            }
+        }
+        Some((out, lands))
+    }
+
+    /// The zone the words give a point: a collapsed pane and a title bar are the centre; else the
+    /// edge the point is nearest by its share of the body, when that is under a quarter (ties to
+    /// the edge named first of left, right, top, bottom), else the centre.
+    fn zone_by_words(r: [f64; 4], collapsed: bool, x: f64, y: f64) -> Zone {
+        let [px, py, pw, ph] = r;
+        if collapsed || y < py + TITLE {
+            return Zone::Centre;
+        }
+        let body = ph - TITLE;
+        let shares = [
+            (x - px) / pw,
+            (px + pw - x) / pw,
+            (y - py - TITLE) / body,
+            (py + ph - y) / body,
+        ];
+        let least = shares.iter().copied().fold(f64::INFINITY, f64::min);
+        if least >= 0.25 {
+            return Zone::Centre;
+        }
+        let k = shares.iter().position(|s| *s == least).unwrap();
+        [Zone::Left, Zone::Right, Zone::Top, Zone::Bottom][k]
+    }
+
+    /// Where the browser suite points in a pane: the body's centre, a tenth of the body in from
+    /// each side on its middle lines, and 8 px from the title bar's right end; in a collapsed pane
+    /// the same tenths of its bar and its middle. With the zone each point is in.
+    fn aim_points(r: Rect, collapsed: bool) -> [(f64, f64, Zone); 6] {
+        let (bx, by, bw, bh) = if collapsed {
+            (r.x, r.y, r.w, r.h)
+        } else {
+            (r.x, r.y + TITLE, r.w, r.h - TITLE)
+        };
+        let (mx, my) = (bx + bw / 2.0, by + bh / 2.0);
+        let z = |z: Zone| if collapsed { Zone::Centre } else { z };
+        let title = if collapsed {
+            (mx, my)
+        } else {
+            (r.x + r.w - 8.0, r.y + TITLE / 2.0)
+        };
+        [
+            (mx, my, Zone::Centre),
+            (bx + bw / 10.0, my, z(Zone::Left)),
+            (bx + bw * 9.0 / 10.0, my, z(Zone::Right)),
+            (mx, by + bh / 10.0, z(Zone::Top)),
+            (mx, by + bh * 9.0 / 10.0, z(Zone::Bottom)),
+            (title.0, title.1, Zone::Centre),
+        ]
+    }
+
+    /// A collapsed pane takes the title bar's extent along its split.
+    fn strips_are_title_bars(n: &Node, rs: &[(PaneId, Rect)]) {
+        if let Node::Split { orient, kids, .. } = n {
+            for k in kids.iter() {
+                if let Node::Pane(p) = k
+                    && p.collapsed
+                {
+                    let r = rs.iter().find(|(id, _)| *id == p.id).unwrap().1;
+                    assert_eq!(if *orient == Orient::Row { r.w } else { r.h }, TITLE, "{}", shape(n));
+                }
+                strips_are_title_bars(k, rs);
+            }
+        }
+    }
+
+    #[test]
+    fn layout_tiles_the_root() {
+        let (mut n, mut sound) = (0, 0);
+        for t in geometries() {
+            for (w, h) in SIZES {
+                let rs = layout(t, w, h);
+                let ids: Vec<PaneId> = panes(t).iter().map(|p| p.id).collect();
+                assert_eq!(rs.iter().map(|(id, _)| *id).collect::<Vec<_>>(), ids, "reading order");
+                let area: f64 = rs.iter().map(|(_, r)| r.w * r.h).sum();
+                assert!((area - w * h).abs() < 1e-6 * w * h, "{} at {w}x{h}: {area}", shape(t));
+                strips_are_title_bars(t, &rs);
+                n += 1;
+                // a pane beside a collapsed one in a split under the title bar's extent has none
+                // left; elsewhere the rects lie inside the root and don't overlap
+                if rs.iter().any(|(_, r)| r.w <= 0.0 || r.h <= 0.0) {
+                    continue;
+                }
+                sound += 1;
+                for (i, (_, a)) in rs.iter().enumerate() {
+                    let inside = a.x >= 0.0 && a.y >= 0.0 && a.x + a.w <= w + 1e-9 && a.y + a.h <= h + 1e-9;
+                    assert!(inside, "{} at {w}x{h}: {a:?}", shape(t));
+                    for (_, b) in &rs[i + 1..] {
+                        let dx = (a.x + a.w).min(b.x + b.w) - a.x.max(b.x);
+                        let dy = (a.y + a.h).min(b.y + b.h) - a.y.max(b.y);
+                        assert!(dx <= 1e-9 || dy <= 1e-9, "{} at {w}x{h}: {a:?} and {b:?}", shape(t));
+                    }
+                }
+            }
+        }
+        assert!(n >= 10_000 && sound * 10 >= n * 9, "{n} layouts, {sound} with every pane drawn");
+        for (p, w, want) in preset_rects() {
+            assert!(near(&boxes(&p.tree(0.54), w, 890.0), &want), "{p:?} at {w}");
+        }
+    }
+
+    #[test]
+    fn aim_finds_the_pane_and_zone_under_a_point() {
+        // every geometry of up to three panes at each size, and of four in the smallest root
+        let shapes = geometries();
+        let mut n = 0usize;
+        for t in shapes {
+            let sizes = if panes(t).len() < 4 { &SIZES[..] } else { &SIZES[3..] };
+            for &(w, h) in sizes {
+                let rs = layout(t, w, h);
+                // a pane squeezed to nothing beside a collapsed one tiles nothing
+                if rs.iter().any(|(_, r)| r.w <= 0.0 || r.h <= 0.0) {
+                    continue;
+                }
+                let mut y = 0.0;
+                while y < h {
+                    let mut x = 0.0;
+                    while x < w {
+                        let (id, z) = aim(t, w, h, x, y).unwrap_or_else(|| panic!("({x}, {y}) in {}", shape(t)));
+                        let r = rs.iter().find(|(p, _)| *p == id).unwrap().1;
+                        assert!(r.holds(x, y), "({x}, {y}) in {} found {id} at {r:?}", shape(t));
+                        let collapsed = find(t, id).unwrap().collapsed;
+                        assert_eq!(z, zone_by_words([r.x, r.y, r.w, r.h], collapsed, x, y), "({x}, {y}) in {r:?}");
+                        n += 1;
+                        x += 7.0;
+                    }
+                    y += 7.0;
+                }
+                for (x, y) in [(-1.0, 1.0), (w, 1.0), (1.0, -1.0), (1.0, h), (w + 3.0, h + 3.0)] {
+                    assert_eq!(aim(t, w, h, x, y), None, "({x}, {y}) is outside");
+                }
+            }
+        }
+        assert!(shapes.len() > 3000 && n >= 100_000, "{} geometries, {n} points", shapes.len());
+    }
+
+    #[test]
+    fn dock_matches_the_hand_worked_cases() {
+        use View::{Files, Graph, Insp, List, Log, Table};
+        use Zone::{Bottom, Centre, Left, Right, Top};
+        const W: f64 = 1600.0;
+        const H: f64 = 890.0;
+        let five = [Graph, Files, Log, Table, List];
+        let same = |a: &Node, b: &Node| to_json(a) == to_json(b);
+        let id_at = |t: &Node, i: usize| panes(t)[i].id;
+        let index = |t: &Node, id: PaneId| panes(t).iter().position(|p| p.id == id).unwrap();
+        // to a millionth of a px
+        let rect = |r: Option<Rect>| r.map(|r| [r.x, r.y, r.w, r.h].map(|u| (u * 1e6).round() / 1e6));
+        let cl = classic(0.54);
+
+        // the last view onto a sibling's edge: its pane closes, and the grown target splits in half
+        let (t, id) = docked(&cl, Insp, 1, Left, W, H).unwrap();
+        assert!(same(&t, &split(Orient::Row, 0.5, leaf(&[Insp], Insp), leaf(&five, Graph))), "{}", shape(&t));
+        assert_eq!(index(&t, id), 0);
+        assert_eq!(rect(preview(&cl, Insp, 1, Left, W, H)), Some([0.0, 0.0, 800.0, H]));
+        // the last view onto a sibling's centre joins it, and the target takes the root
+        let (t, id) = docked(&cl, Insp, 1, Centre, W, H).unwrap();
+        assert!(same(&t, &leaf(&[Graph, Files, Log, Table, List, Insp], Insp)));
+        assert_eq!(id, 1);
+        assert_eq!(rect(preview(&cl, Insp, 1, Centre, W, H)), Some([0.0, 0.0, W, H]));
+        // a tab that isn't shown leaves its pane showing what it showed
+        let (t, id) = docked(&cl, Log, 2, Centre, W, H).unwrap();
+        let want = split(Orient::Row, 0.54, leaf(&[Graph, Files, Table, List], Graph), leaf(&[Insp, Log], Log));
+        assert!(same(&t, &want), "{}", shape(&t));
+        assert_eq!(index(&t, id), 1);
+        assert_eq!(rect(preview(&cl, Log, 2, Centre, W, H)), Some([864.0, 0.0, 736.0, H]));
+        // its own pane's edge splits it when it holds other views; the pane shows the next view
+        let (t, id) = docked(&cl, Graph, 1, Right, W, H).unwrap();
+        let want = split(
+            Orient::Row,
+            0.54,
+            split(Orient::Row, 0.5, leaf(&[Files, Log, Table, List], Files), leaf(&[Graph], Graph)),
+            leaf(&[Insp], Insp),
+        );
+        assert!(same(&t, &want), "{}", shape(&t));
+        assert_eq!(index(&t, id), 1);
+        assert_eq!(rect(preview(&cl, Graph, 1, Right, W, H)), Some([432.0, 0.0, 432.0, H]));
+        // no zone of its own pane when that holds only the dragged view; never its own centre
+        assert!(Zone::ALL.iter().all(|z| docked(&cl, Insp, 2, *z, W, H).is_none()));
+        assert!(docked(&cl, Graph, 1, Centre, W, H).is_none());
+        // the last tab, shown, leaves: the first shows
+        let mut t = split(Orient::Row, 0.5, leaf(&[Graph, Files, List], List), leaf(&[Insp], Insp));
+        number(&mut t);
+        let (r, _) = docked(&t, List, 2, Centre, W, H).unwrap();
+        assert_eq!(panes(&r)[0].shown, Graph);
+
+        // three's Graph bar: no edges, and a join expands it at its 40% share
+        let th = three();
+        assert!([Left, Right, Top, Bottom].iter().all(|z| docked(&th, Files, 1, *z, W, H).is_none()));
+        let (r, _) = docked(&th, Files, 1, Centre, W, H).unwrap();
+        assert!(same(at(&r, &[0]).unwrap(), &leaf(&[Graph, Files], Files)), "{}", shape(&r));
+        assert!(same(at(&r, &[1, 1]).unwrap(), &leaf(&[Log, Table, List], Log)), "{}", shape(&r));
+        assert_eq!(rect(preview(&th, Files, 1, Centre, W, H)), Some([0.0, 0.0, W, 356.0]));
+        // the collapsed bar's only view onto Files' top: the bar closes, the new pane is expanded
+        let (r, _) = docked(&th, Graph, 3, Top, W, H).unwrap();
+        let want = split(
+            Orient::Row,
+            0.5,
+            leaf(&[Insp], Insp),
+            split(Orient::Col, 0.5, leaf(&[Graph], Graph), leaf(&[Files, Log, Table, List], Files)),
+        );
+        assert!(same(&r, &want), "{}", shape(&r));
+        assert_eq!(rect(preview(&th, Graph, 3, Top, W, H)), Some([800.0, 0.0, 800.0, 445.0]));
+
+        // the floors at 900 wide: classic's main pane (486) splits into 243 and 243; a 243 px pane
+        // is too narrow to split side by side and tall enough to stack
+        assert_eq!(rect(preview(&cl, List, 1, Right, 900.0, H)), Some([243.0, 0.0, 243.0, H]));
+        let (a, _) = docked(&cl, List, 1, Right, 900.0, H).unwrap();
+        let mid = id_at(&a, 1);
+        assert!([Left, Right].iter().all(|z| docked(&a, Log, mid, *z, 900.0, H).is_none()));
+        assert!([Top, Bottom].iter().all(|z| docked(&a, Log, mid, *z, 900.0, H).is_some()));
+        // stacked at 890 high: 445, then 222.5, then 111.25, under 120
+        let st = stacked();
+        assert_eq!(rect(preview(&st, List, 1, Bottom, W, H)), Some([0.0, 222.5, W, 222.5]));
+        let (b, _) = docked(&st, List, 1, Bottom, W, H).unwrap();
+        assert!(docked(&b, Log, id_at(&b, 1), Top, W, H).is_none());
+        // the boundary: a pane exactly 400 wide splits into two of 200
+        let mut t = split(Orient::Row, 0.25, leaf(&[Graph, Files], Graph), leaf(&[Insp], Insp));
+        number(&mut t);
+        assert!(docked(&t, Insp, 1, Right, W, H).is_some());
+        assert!(docked(&t, Files, 1, Right, 1599.0, H).is_none());
+
+        // a source closing so that two collapsed panes share a split is refused
+        let mut t = split(
+            Orient::Row,
+            0.5,
+            split(
+                Orient::Col,
+                0.5,
+                shut(&[Graph], Graph),
+                split(Orient::Row, 0.5, leaf(&[Files], Files), shut(&[Log], Log)),
+            ),
+            leaf(&[Table, List, Insp], Table),
+        );
+        number(&mut t);
+        assert!(folded_well(&t), "the fixture keeps the rules");
+        assert!(Zone::ALL.iter().all(|z| docked(&t, Files, id_at(&t, 3), *z, W, H).is_none()));
+        assert!(docked(&t, Table, id_at(&t, 1), Centre, W, H).is_some());
+        // stacked: the Inspector on top of the main pane takes the top half of the root
+        assert_eq!(rect(preview(&st, Insp, 1, Top, W, H)), Some([0.0, 0.0, W, 445.0]));
+        // a centre drop on the neighbour is what the move key does
+        let (t, _) = docked(&cl, Graph, 2, Centre, W, H).unwrap();
+        let want = split(Orient::Row, 0.54, leaf(&[Files, Log, Table, List], Files), leaf(&[Insp, Graph], Graph));
+        assert!(same(&t, &want), "{}", shape(&t));
+
+        // every valid drop from a preset keeps the rules and holds the six views once
+        let mut n = 0;
+        for p in Preset::ALL {
+            let t = p.tree(0.54);
+            for (w, h) in [(1600.0, 890.0), (900.0, 890.0), (1600.0, 918.0), (900.0, 918.0)] {
+                for v in View::ALL {
+                    for q in panes(&t) {
+                        for z in Zone::ALL {
+                            let Some((r, id)) = docked(&t, v, q.id, z, w, h) else { continue };
+                            n += 1;
+                            assert!(lawful(&r, &t) && panes(&r).iter().map(|p| p.views.len()).sum::<usize>() == 6);
+                            let at = layout(&r, w, h).into_iter().find(|(p, _)| *p == id).map(|(_, r)| r);
+                            assert_eq!(preview(&t, v, q.id, z, w, h), at);
+                        }
+                    }
+                }
+            }
+        }
+        assert!(n > 100, "{n} drops");
+        // each point the suite aims at is in its pane and zone, the title bar's in the centre
+        for p in Preset::ALL {
+            let t = p.tree(0.54);
+            for w in [1600.0, 900.0] {
+                for (id, r) in layout(&t, w, H) {
+                    let collapsed = find(&t, id).unwrap().collapsed;
+                    for (x, y, z) in aim_points(r, collapsed) {
+                        assert_eq!(aim(&t, w, H, x, y), Some((id, z)), "{p:?} at {w}, pane {id}, ({x}, {y})");
+                    }
+                }
+            }
+        }
+        assert_eq!(zone_at(Rect { x: 0.0, y: 0.0, w: 864.0, h: H }, false, 5.0, 10.0), Centre);
+        assert_eq!(zone_at(Rect { x: 864.0, y: 0.0, w: 736.0, h: H }, false, 1000.0, 860.0), Bottom);
+        assert_eq!(zone_at(Rect { x: 0.0, y: 0.0, w: 864.0, h: H }, false, 50.0, 400.0), Left);
+        assert_eq!(aim(&cl, W, H, 1600.0, 10.0), None);
+        assert_eq!(aim(&cl, W, H, 10.0, -1.0), None);
+    }
+
+    #[test]
+    fn dock_sweep_matches_the_written_rules() {
+        // valid and refused, at the centre and on an edge
+        let mut seen = [[0usize; 2]; 2];
+        let n = sweep(|t, v, id, z, w, h| {
+            let got = docked(t, v, id, z, w, h);
+            assert_eq!(got, written(t, v, id, z, w, h), "{v:?} onto {id} {z:?} at {w}x{h} in {}", shape(t));
+            seen[(z == Zone::Centre) as usize][got.is_some() as usize] += 1;
+        });
+        assert!(n >= 100_000, "{n} drops");
+        assert!(seen.iter().flatten().all(|k| *k > 1000), "{seen:?}");
+    }
+
+    #[test]
+    fn refused_dock_changes_nothing() {
+        let mut refused = 0;
+        let n = sweep(|t, v, id, z, w, h| {
+            let mut after = t.clone();
+            let o = dock(&mut after, v, id, z, w, h);
+            match docked(t, v, id, z, w, h) {
+                None => {
+                    assert_eq!(o, Outcome::default(), "{v:?} onto {id} {z:?} in {}", shape(t));
+                    assert_eq!(&after, t);
+                    refused += 1;
+                }
+                Some((r, lands)) => {
+                    assert_eq!(o, Outcome { changed: true, focus: Some(lands), toast: None });
+                    assert_eq!(after, r);
+                }
+            }
+        });
+        assert!(n >= 100_000 && refused * 10 > n, "{n} drops, {refused} refused");
+    }
+
+    #[test]
+    fn dock_preview_is_the_rect_the_view_lands_in() {
+        let mut valid = 0;
+        let n = sweep(|t, v, id, z, w, h| {
+            let p = preview(t, v, id, z, w, h);
+            let Some((r, lands)) = docked(t, v, id, z, w, h) else {
+                assert_eq!(p, None, "{v:?} onto {id} {z:?} in {}", shape(t));
+                return;
+            };
+            valid += 1;
+            assert_eq!(holder(&r, v), Some(lands));
+            let rs = layout(&r, w, h);
+            let at = |id: PaneId| rs.iter().find(|(p, _)| *p == id).map(|(_, r)| *r);
+            assert_eq!(p, at(lands), "{v:?} onto {id} {z:?} at {w}x{h} in {}", shape(t));
+            // an edge halves the target's extent in the result between it and the new pane
+            if z != Zone::Centre {
+                let (a, b) = (at(lands).unwrap(), at(id).unwrap());
+                let across = matches!(z, Zone::Left | Zone::Right);
+                let (x, y) = if across { (a.w, b.w) } else { (a.h, b.h) };
+                assert!((x - y).abs() < 1e-9, "{v:?} onto {id} {z:?} at {w}x{h} in {}", shape(t));
+            }
+        });
+        assert!(n >= 100_000 && valid * 10 > n, "{n} drops, {valid} valid");
+    }
+
+    #[test]
+    fn centre_dock_on_the_neighbour_equals_the_move_keys() {
+        let mut n = 0;
+        for t in domain() {
+            for p in panes(t) {
+                for dir in [Dir::Next, Dir::Prev] {
+                    let Some(nb) = neighbour(t, p.id, dir) else { continue };
+                    for (w, h) in SIZES {
+                        let (mut a, mut b) = (t.clone(), t.clone());
+                        let got = dock(&mut a, p.shown, nb, Zone::Centre, w, h);
+                        let want = move_view(&mut b, p.id, dir);
+                        assert_eq!(got, want, "pane {} {dir:?} in {}", p.id, shape(t));
+                        assert_eq!(a, b, "pane {} {dir:?} in {}", p.id, shape(t));
+                        n += 1;
+                    }
+                }
+            }
+        }
+        assert!(n >= 100_000, "{n} drops");
+    }
+
+    #[test]
+    fn docked_trees_survive_save_and_load() {
+        let mut valid = 0;
+        let n = sweep(|t, v, id, z, w, h| {
+            let Some((r, _)) = docked(t, v, id, z, w, h) else { return };
+            valid += 1;
+            let back = from_json(&to_json(&r)).and_then(sanitise);
+            let mut want = r.clone();
+            number(&mut want);
+            assert_eq!(back, Some(want), "{v:?} onto {id} {z:?} in {}", shape(t));
+        });
+        assert!(n >= 100_000 && valid * 10 > n, "{n} drops, {valid} valid");
     }
 }

@@ -6,9 +6,9 @@
 use std::cell::{Cell, RefCell};
 
 use wasm_bindgen::prelude::*;
-use web_sys::{Element, PointerEvent};
+use web_sys::{Element, MouseEvent, PointerEvent};
 
-use crate::arrange::{self, Node, Orient, PaneId, View};
+use crate::arrange::{self, Node, Orient, PaneId, View, Zone};
 use crate::state::{cfg, cfg_mut, s, s_mut, save_settings};
 use crate::{dom, graph, nav};
 
@@ -51,6 +51,36 @@ thread_local! {
     /// the view the keys went to off screen when last drawn, so it is drawn once as it gets there
     /// and not again on every redraw (a sash drag redraws on each move)
     static KEY_OFF: Cell<Option<View>> = const { Cell::new(None) };
+    /// a tab held by the pointer, to drag its view onto a pane
+    static TAB: RefCell<Tab> = const { RefCell::new(Tab::Idle) };
+    /// the one-shot listener that swallows the click ending a drag, while it is armed
+    static SWALLOW: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };    /// counts drags begun, so a frame watching an earlier drag's capture stops
+    static DRAGS: Cell<u32> = const { Cell::new(0) };
+}
+
+/// How far a pressed tab moves, in px, before its view is dragged; under it the press stays a click.
+const THRESHOLD: f64 = 4.0;
+
+/// A pressed tab, from the press to the release. Every handler takes it out of `TAB`, acts, and
+/// stores the next one, so nothing holds it across a call that can re-enter.
+enum Tab {
+    Idle,
+    /// pressed, not yet moved past the threshold
+    Pending {
+        pid: i32,
+        view: View,
+        at: (f64, f64),
+        tab: Element,
+    },
+    /// dragging the view: `tree` is the arrangement as the drag began, which every move aims at
+    Dragging {
+        pid: i32,
+        view: View,
+        tab: Element,
+        tree: Node,
+    },
+    /// cancelled with the button still down: the rest of the press does nothing
+    Cancelled,
 }
 
 fn root_id(v: View) -> &'static str {
@@ -367,6 +397,13 @@ fn client(e: &PointerEvent) -> (f64, f64) {
 }
 
 fn on_down(e: PointerEvent) {
+    let primary = e.button() == 0 && e.is_primary();
+    if primary {
+        // a gesture whose release never arrived (the window lost it) ends here, so this press is
+        // never swallowed
+        TAB.with(|t| t.replace(Tab::Idle));
+        disarm_swallow(None);
+    }
     let t = e.target();
     if let Some(sash) = dom::closest(&t, ".sash") {
         start_drag(&e, sash);
@@ -377,6 +414,21 @@ fn on_down(e: PointerEvent) {
         .and_then(|x| x.parse::<PaneId>().ok())
     {
         focus(id);
+    }
+    // a press on a tab may become a drag of its view (the press has focused its pane first)
+    let tab = dom::closest(&t, ".ptab[data-view]");
+    let view = tab
+        .as_ref()
+        .and_then(|b| dom::data(b, "view"))
+        .and_then(|v| View::parse(&v));
+    if let (true, Some(tab), Some(view)) = (primary, tab, view) {
+        let next = Tab::Pending {
+            pid: e.pointer_id(),
+            view,
+            at: client(&e),
+            tab,
+        };
+        TAB.with(|t| *t.borrow_mut() = next);
     }
 }
 
@@ -467,9 +519,231 @@ fn pane_at((x, y): (f64, f64)) -> Option<PaneId> {
         .and_then(|x| x.parse().ok())
 }
 
+// ---- dragging a tab's view onto a pane -------------------------------------------------------
+
+/// `#panes`'s rect in client px: its origin, width and height.
+fn panes_rect() -> (f64, f64, f64, f64) {
+    let r = dom::id("panes").get_bounding_client_rect();
+    (r.left(), r.top(), r.width(), r.height())
+}
+
+/// The valid zone under a client point for a drag of `view` over `tree`, and the rect in client
+/// px the view would take there.
+fn aim_at(tree: &Node, view: View, x: f64, y: f64) -> Option<((PaneId, Zone), arrange::Rect)> {
+    let (left, top, w, h) = panes_rect();
+    let (target, zone) = arrange::aim(tree, w, h, x - left, y - top)?;
+    let r = arrange::preview(tree, view, target, zone, w, h)?;
+    Some((
+        (target, zone),
+        arrange::Rect {
+            x: left + r.x,
+            y: top + r.y,
+            ..r
+        },
+    ))
+}
+
+/// Show the outline over `r`, or hide it.
+fn outline(r: Option<arrange::Rect>) {
+    let Some(el) = dom::try_id("dock") else {
+        return;
+    };
+    match r {
+        Some(r) => {
+            dom::set_style(&el, "left", &format!("{}px", r.x));
+            dom::set_style(&el, "top", &format!("{}px", r.y));
+            dom::set_style(&el, "width", &format!("{}px", r.w));
+            dom::set_style(&el, "height", &format!("{}px", r.h));
+            dom::set_hidden(&el, false);
+        }
+        None => dom::set_hidden(&el, true),
+    }
+}
+
+/// Swallow the click that ends a drag: the first click with a pointer behind it (`detail > 0`; a
+/// key's click passes), in the capture phase, before anything sees it. It is gone by the next task,
+/// since the click comes in the same task as the release.
+fn arm_swallow() {
+    disarm_swallow(None);
+    let cb = Closure::<dyn FnMut(MouseEvent)>::new(|e: MouseEvent| {
+        let detail = js_sys::Reflect::get(&e, &JsValue::from_str("detail"))
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        if detail > 0.0 {
+            e.stop_immediate_propagation();
+            e.prevent_default();
+            disarm_swallow(None);
+        }
+    });
+    let f: js_sys::Function = cb.into_js_value().unchecked_into();
+    let _ = dom::win().add_event_listener_with_callback_and_bool("click", &f, true);
+    SWALLOW.with(|s| *s.borrow_mut() = Some(f.clone()));
+    dom::timeout(0, move || disarm_swallow(Some(f)));
+}
+
+/// Remove the click swallower: any, or only `this` one if it is still the one armed.
+fn disarm_swallow(this: Option<js_sys::Function>) {
+    let Some(f) = SWALLOW.with(|s| {
+        let mut s = s.borrow_mut();
+        let ours = match (&*s, &this) {
+            (Some(cur), Some(f)) => JsValue::from(cur.clone()) == JsValue::from(f.clone()),
+            (Some(_), None) => true,
+            _ => false,
+        };
+        if ours { s.take() } else { None }
+    }) else {
+        return;
+    };
+    let _ = dom::win().remove_event_listener_with_callback_and_bool("click", &f, true);
+}
+
+/// A drag is under way.
+pub fn dragging() -> bool {
+    TAB.with(|t| matches!(*t.borrow(), Tab::Dragging { .. }))
+}
+
+/// Cancel a drag under way: the outline goes, the pointer is let go, and the rest of the press
+/// does nothing. True when there was one.
+pub fn cancel_drag() -> bool {
+    let st = TAB.with(|t| t.replace(Tab::Idle));
+    let Tab::Dragging { pid, tab, .. } = st else {
+        TAB.with(|t| *t.borrow_mut() = st);
+        return false;
+    };
+    outline(None);
+    if tab.has_pointer_capture(pid) {
+        let _ = tab.release_pointer_capture(pid);
+    }
+    TAB.with(|t| *t.borrow_mut() = Tab::Cancelled);
+    true
+}
+
+/// Watch the dragged tab's pointer capture each frame, and cancel the drag when it is gone. Chromium
+/// tells of a capture released or a tab removed (`lostpointercapture`) only with the next pointer
+/// event, but `hasPointerCapture` reads false at once; so the drag ends with no move after it.
+fn watch_capture(drag: u32) {
+    dom::raf(move |_| {
+        if DRAGS.get() != drag {
+            return;
+        }
+        let lost = TAB.with(|t| match &*t.borrow() {
+            Tab::Dragging { tab, pid, .. } => Some(!tab.has_pointer_capture(*pid)),
+            _ => None,
+        });
+        match lost {
+            Some(true) => {
+                cancel_drag();
+            }
+            Some(false) => watch_capture(drag),
+            None => {}
+        }
+    });
+}
+
+fn tab_move(e: PointerEvent) {
+    let st = TAB.with(|t| t.replace(Tab::Idle));
+    let next = match st {
+        // the release happened where it couldn't be seen
+        Tab::Pending { .. } | Tab::Cancelled if e.buttons() == 0 => Tab::Idle,
+        Tab::Pending { pid, view, at, tab } if e.pointer_id() == pid => {
+            let (x, y) = client(&e);
+            if (x - at.0).hypot(y - at.1) < THRESHOLD {
+                Tab::Pending { pid, view, at, tab }
+            } else {
+                let _ = tab.set_pointer_capture(pid);
+                let drag = DRAGS.get().wrapping_add(1);
+                DRAGS.set(drag);
+                watch_capture(drag);
+                let tree = cfg().arr.clone();
+                outline(aim_at(&tree, view, x, y).map(|h| h.1));
+                Tab::Dragging {
+                    pid,
+                    view,
+                    tab,
+                    tree,
+                }
+            }
+        }
+        Tab::Dragging {
+            pid,
+            view,
+            tab,
+            tree,
+        } if e.pointer_id() == pid => {
+            let (x, y) = client(&e);
+            outline(aim_at(&tree, view, x, y).map(|h| h.1));
+            Tab::Dragging {
+                pid,
+                view,
+                tab,
+                tree,
+            }
+        }
+        other => other,
+    };
+    TAB.with(|t| *t.borrow_mut() = next);
+}
+
+fn tab_up(e: PointerEvent) {
+    let st = TAB.with(|t| t.replace(Tab::Idle));
+    match st {
+        // under the threshold: the click that follows does what it always did
+        Tab::Pending { pid, .. } if e.pointer_id() == pid => {}
+        Tab::Dragging {
+            pid, view, tree, ..
+        } if e.pointer_id() == pid => {
+            // the release point is aimed as a move is, so it lands where the outline last showed
+            let (x, y) = client(&e);
+            let hit = aim_at(&tree, view, x, y).map(|h| h.0);
+            outline(None);
+            arm_swallow();
+            let (_, _, w, h) = panes_rect();
+            // the arrangement can't have changed under the drag (every key cancels it); if it
+            // has, the drop is dropped
+            let same = cfg().arr == tree;
+            if let (Some((target, zone)), true) = (hit, same) {
+                nav::operate(move |n, _| arrange::dock(n, view, target, zone, w, h));
+            }
+        }
+        Tab::Cancelled => arm_swallow(),
+        other => TAB.with(|t| *t.borrow_mut() = other),
+    }
+}
+
+/// The pointer is gone (`pointercancel`): cancel, and no click follows.
+fn tab_cancel(e: PointerEvent) {
+    let ours = TAB.with(|t| match &*t.borrow() {
+        Tab::Pending { pid, .. } | Tab::Dragging { pid, .. } => *pid == e.pointer_id(),
+        Tab::Cancelled => true,
+        Tab::Idle => false,
+    });
+    if ours {
+        cancel_drag();
+        outline(None);
+        TAB.with(|t| t.replace(Tab::Idle));
+    }
+}
+
+/// The dragged tab lost the pointer: cancel (if the frame watch hasn't yet). A capture another
+/// element lost is not ours; one lost to a removal arrives at the document.
+fn tab_lost(e: PointerEvent) {
+    let other = TAB.with(|t| match &*t.borrow() {
+        Tab::Dragging { tab, pid, .. } => {
+            *pid != e.pointer_id()
+                || dom::target_el(&e).is_some_and(|el| el != *tab && el.is_connected())
+        }
+        _ => true,
+    });
+    if !other {
+        cancel_drag();
+    }
+}
+
 /// Draw the arrangement, focus its default pane, and wire the pointer: a press in a pane focuses
-/// it, a press on a sash drags it (the pointer captured, the floors applied, saved on release).
-/// Each pane body is watched for crossing the narrow floor.
+/// it, a press on a sash drags it (the pointer captured, the floors applied, saved on release), and
+/// a tab dragged past the threshold carries its view to the pane and zone it is released over, an
+/// outline showing where it will land. Each pane body is watched for crossing the narrow floor.
 pub fn wire() {
     let f = arrange::default_focus(&cfg().arr);
     s_mut().focus = f;
@@ -484,4 +758,11 @@ pub fn wire() {
     dom::on(host.as_ref(), "pointermove", on_move);
     dom::on(host.as_ref(), "pointerup", on_up);
     dom::on(host.as_ref(), "lostpointercapture", on_up);
+    // a captured tab's moves and release bubble to the document, and so does a capture lost to
+    // the tab's removal
+    let doc = dom::doc();
+    dom::on(doc.as_ref(), "pointermove", tab_move);
+    dom::on(doc.as_ref(), "pointerup", tab_up);
+    dom::on(doc.as_ref(), "pointercancel", tab_cancel);
+    dom::on(doc.as_ref(), "lostpointercapture", tab_lost);
 }

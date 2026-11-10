@@ -162,11 +162,14 @@ a { color: inherit; }
 .psplit[data-orient="row"] > .sash { top: 0; bottom: 0; width: 5px; left: calc(var(--f) * 100% - 2.5px); cursor: col-resize; }
 .psplit[data-orient="col"] > .sash { left: 0; right: 0; height: 5px; top: calc(var(--f) * 100% - 2.5px); cursor: row-resize; }
 .sash:hover, .sash.drag { background: var(--accent-dim); }
+/* the outline of where a dragged tab's view lands: over the panes and sashes, under the help;
+   placed in client px on every move, so no transition */
+.dock { position: fixed; z-index: 40; pointer-events: none; box-sizing: border-box; background: var(--accent-dim); border: 2px solid var(--accent); }
 .pane { position: relative; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
-.ptitle { flex: none; height: 24px; display: flex; align-items: stretch; gap: 2px; padding: 0 4px; min-width: 0; overflow: hidden; background: var(--bg-2); border-bottom: 1px solid var(--line); }
+.ptitle { flex: none; height: 24px; display: flex; align-items: stretch; gap: 2px; padding: 0 4px; min-width: 0; overflow: hidden; background: var(--bg-2); border-bottom: 1px solid var(--line); user-select: none; }
 .pane[data-focused="1"] > .ptitle { background: var(--bg-4); box-shadow: inset 0 2px 0 var(--accent); }
 /* tabs shrink to fit: the label ends in "…", the key hint stays */
-.ptab { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px 0 2px; color: var(--ink-2); font-size: 11px; letter-spacing: .08em; white-space: nowrap; overflow: hidden; border-bottom: 2px solid transparent; }
+.ptab { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px 0 2px; color: var(--ink-2); font-size: 11px; letter-spacing: .08em; white-space: nowrap; overflow: hidden; border-bottom: 2px solid transparent; touch-action: none; }
 .ptab kbd { flex: none; background: var(--bg-4); color: var(--accent-text); border: 1px solid var(--line-2); padding: 0 4px; font-size: 10.5px; line-height: 15px; min-width: 16px; text-align: center; }
 .ptab span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ptab:hover { color: var(--ink); }

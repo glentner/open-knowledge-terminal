@@ -51,7 +51,7 @@ Useful flags: `--theme terminal|dark|light`, `--accent '#ffa028'`, `--font "Berk
 | `okt-pygments/` | Syntax highlighting that reproduces Pygments' HTML output exactly (lexer tables exported from Pygments by `tools/pygments/export.py`, run by a Rust port of Pygments' lexer engine). |
 | `vendor/markdown-it/` | markdown-it 0.6.1 with one fix (emphasis source maps across stripped line prefixes); see `Cargo.toml` `[patch.crates-io]`. |
 | `tests/env.sh` | A throwaway okt server on 6581 over a fresh clone of the KB, to run the browser tests against. |
-| `tests/ui/` | Browser tests: the navigation keys (see Keys), the Files columns, the inspector's History tab, the pane arrangement, and a soak test for a page left open all day. |
+| `tests/ui/` | Browser tests: the navigation keys (see Keys), the Files columns, the inspector's History tab, the pane arrangement, dragging a tab to dock it, and a soak test for a page left open all day. |
 | `tests/perf/` | Main-thread cost and frame pacing of a fixed set of interactions, compared across two builds. |
 
 ## Tests
@@ -61,6 +61,7 @@ make test                                                   # unit tests
 tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/keys.mjs"'     # the navigation keys, the Files columns
 tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/history.mjs"'  # the History tab
 tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/panes.mjs"'    # the pane arrangement
+tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/dock.mjs"'     # dragging a tab to dock it
 tests/env.sh sh -c 'node "$OKT_ROOT/tests/ui/soak.mjs" "$OKT_KB" "$OKT"'
 ```
 
@@ -78,6 +79,21 @@ dragging a split, the presets, collapse, the pane operations, and each view fitt
 Graph and Files side by side, every view in a 200 px pane, the legend by its pane's width). Its
 check of a commit reaching an off-screen Log makes an empty commit in `$OKT_KB`, so it runs only
 under `tests/env.sh`; anywhere else it prints a skip line.
+
+`dock.mjs` grades dragging a view's tab onto a pane with real pointer input, from what renders.
+Every preset at 1600 and 900 px wide is swept: each pane's shown tab, and the last tab it doesn't
+show, is dropped on six points of every pane, aimed at its five zones and its title bar (36 drops
+a preset at each width, 72 for the three-pane one). Each drop is checked against
+`dock-oracle.mjs`: the outline shows only where a drop is valid, and the view lands in the rect it
+shows. The checks also cover the tree drawn and saved, focus, the hash and history, every shown
+view filling its pane, and a reload. Every view is also dragged out of a collapsed strip, and
+views onto one. Every way of cancelling (Esc, another key, a release outside every pane, the
+window losing focus, lost pointer capture) must leave the panes, saved settings, hash and history
+as they were. A press under the drag threshold is still a click. Panes too small to split refuse
+the drop. The view keys step after a drop, with the key view on screen or not, and a moved view
+keeps its scroll, selection and Inspector tab. The full run takes about 25 minutes.
+`DOCK_GROUPS="sweep cancel"` (or group names as arguments) narrows it to the named groups, and a
+prefix selects every group it begins.
 
 End-to-end tests of the JSON API, raw files, the watcher and the rendered panes are not written
 yet; `ROADMAP.md` tracks them.
@@ -103,7 +119,9 @@ yet; `ROADMAP.md` tracks them.
   again; `w x` swaps it with its neighbour, each keeping its views; `w r` turns its split between
   side by side and stacked; `w q` closes it, its views going to the neighbour, which takes the
   space; `w v`/`w V` move its shown view to the neighbour, and moving its last view closes it. The
-  only pane can't be closed, collapsed or emptied. The arrangement you leave is kept per KB.
+  only pane can't be closed, collapsed or emptied. Drag a tab onto another pane to add its view
+  there, or onto a pane's edge to split it and give the view that side; an outline shows where it
+  will land, and Esc cancels. The arrangement you leave is kept per KB.
 - Anywhere: `J`/`K` scroll the inspector, `s` switches between source and rendered, `y` copies the
   path, `m` pins the selection and `1`–`9` go to the pins (kept per KB), `n`/`N` step through FIND
   matches and on into the next or previous result file, and `E`/`O`/`F` edit, open and reveal, as

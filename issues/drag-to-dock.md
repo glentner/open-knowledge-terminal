@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:drag-to-dock
 kind: feature
 appetite: big
 ---

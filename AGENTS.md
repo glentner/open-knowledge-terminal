@@ -23,6 +23,15 @@ layout, the title bars and tabs, the view keys and focus, dragging a split, the 
 the pane operations, and each view fitting its pane (its check of a commit reaching an off-screen
 Log makes an empty commit in the clone, so it runs only under `tests/env.sh` and prints a skip line
 anywhere else).
+`tests/ui/dock.mjs` covers dragging a tab to dock its view, with real pointer input graded from
+rendered rects: every preset at 1600 and 900 px swept from each pane's shown tab and the last tab
+it doesn't show onto six points of every pane (aimed at its five zones and title bar), against
+`tests/ui/dock-oracle.mjs` (the drop rules, pure and written apart from the client), then every
+view dragged out of a collapsed strip and views dropped onto one, the cancels, a click under the
+drag threshold, refused drops, the key view and a moved view's state. It writes nothing to the
+clone but takes the server and the settings key from `OKT` and `OKT_KB`, so run it under
+`tests/env.sh`. A full run takes about 25 minutes; `DOCK_GROUPS` (or group names as arguments, a
+prefix selecting every group it begins) narrows it.
 `tests/ui/soak.mjs` checks that memory and listeners plateau on a page left open;
 `tests/perf/profile.mjs` measures main-thread cost and frame pacing, and `tests/perf/compare.py`
 compares two runs. They need Playwright (`npm install` in `tests/`).
@@ -35,8 +44,12 @@ compares two runs. They need Playwright (`npm install` in `tests/`).
   `pwa.rs`, `launch.rs` (editor/open/reveal), `main.rs` (CLI, detach/stop).
 - `okt-client/src`: one module per view or concern (`graph`, `views/*`,
   `insp`, `go`, `chrome`, `live`, `nav`, `keys`, `actions`); `arrange.rs` is the pane arrangement
-  (the split tree, its JSON and its operations; pure, tested natively) and `panes.rs` draws it in
-  `#panes` (title bars, the view roots moved between panes, the sash drag); `js.rs` holds the JavaScript
+  (the split tree, its JSON and its operations, its layout in px, and the drop model: the pane and
+  zone a point aims at, and the tree and outline a dock gives; pure, tested natively) and `panes.rs`
+  draws it in `#panes` (title bars, the view roots moved between panes, the sash drag, and the tab
+  drag: its pointer states, the `#dock` outline and swallowing the click that ends a drag);
+  `keys.rs`'s capture-phase `keydown` on `window`, ahead of every other key handler, and the
+  window's `blur` cancel a tab drag; `js.rs` holds the JavaScript
   semantics the output depends on (number formatting, `toFixed`, `localeCompare`, object key
   order, UTF-16 lengths); `state.rs` holds `S`, settings (localStorage `okt:<kb>`) and the boot data.
 - `okt-client/static`: the page, `app.css` (the stylesheet; the graph rules in it are

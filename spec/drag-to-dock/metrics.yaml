@@ -1,0 +1,37 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: drag-to-dock
+escaped_from: null
+planned: {date: '2026-11-09', phases: 4}
+landed: {date: '2026-11-10', phases: 4, failed_verifies: 2}
+open: null
+runs:
+- {step: feature, start: '2026-11-09T17:06:28-05:00', stop: '2026-11-09T17:11:12-05:00', seconds: 284, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-11-09T17:11:12-05:00', stop: '2026-11-09T18:17:47-05:00', seconds: 3995, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-11-09T18:17:47-05:00', stop: '2026-11-09T23:15:57-05:00', seconds: 17890, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P2', start: '2026-11-09T23:33:38-05:00', stop: '2026-11-10T00:56:47-05:00', seconds: 4989, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P3', start: '2026-11-10T00:57:25-05:00', stop: '2026-11-10T01:23:25-05:00', seconds: 1560, end: question, agent: null}
+- {step: plan, start: '2026-11-10T01:23:59-05:00', stop: '2026-11-10T01:53:49-05:00', seconds: 1790, end: gate, agent: null}
+- {step: 'build:P3', start: '2026-11-10T01:53:58-05:00', stop: '2026-11-10T02:38:52-05:00', seconds: 2694, end: gate, agent: null}
+- {step: 'build:P4', start: '2026-11-10T02:38:52-05:00', stop: '2026-11-10T03:18:01-05:00', seconds: 2349, end: done, agent: null}
+- {step: review, start: '2026-11-10T03:18:41-05:00', stop: '2026-11-10T04:05:34-05:00', seconds: 2813, end: done, agent: null}
+- {step: 'build:P4', start: '2026-11-10T04:06:12-05:00', stop: '2026-11-10T04:09:25-05:00', seconds: 193, end: done, agent: null}
+- {step: review, start: '2026-11-10T04:09:32-05:00', stop: '2026-11-10T04:59:08-05:00', seconds: 2976, end: done, agent: null}
+- {step: 'build:P4', start: '2026-11-10T04:59:29-05:00', stop: '2026-11-10T05:05:53-05:00', seconds: 384, end: done, agent: null}
+- {step: review, start: '2026-11-10T05:05:59-05:00', stop: '2026-11-10T06:04:14-05:00', seconds: 3495, end: done, agent: null}
+- {step: publish, start: '2026-11-10T06:04:55-05:00', stop: '2026-11-10T06:06:03-05:00', seconds: 68, end: done, agent: null}
+reviews:
+- cycle: 1
+  date: '2026-11-10'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 1, low: 0}
+  plausible: 0
+- cycle: 2
+  date: '2026-11-10'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 1, low: 0}
+  plausible: 0
+- cycle: 3
+  date: '2026-11-10'
+  verdict: approved
+  confirmed: {critical: 0, high: 0, medium: 0, low: 0}
+  plausible: 0

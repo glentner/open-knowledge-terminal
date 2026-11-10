@@ -322,6 +322,24 @@ fn on_click(e: MouseEvent) {
     }
 }
 
+/// A key while a tab's view is being dragged, as the pane leader takes one: a modifier alone
+/// leaves the drag going, Escape cancels it and does nothing else, and any other key cancels it and
+/// is then handled as usual. Keys while a tab is only pressed are handled as usual.
+fn on_drag_key(e: KeyboardEvent) {
+    if !panes::dragging() {
+        return;
+    }
+    let k = e.key();
+    if matches!(k.as_str(), "Shift" | "Control" | "Alt" | "Meta" | "CapsLock") {
+        return;
+    }
+    panes::cancel_drag();
+    if k == "Escape" {
+        e.prevent_default();
+        e.stop_immediate_propagation();
+    }
+}
+
 fn on_key(e: KeyboardEvent) {
     if e.meta_key() || e.ctrl_key() || e.alt_key() {
         return;
@@ -703,8 +721,19 @@ pub fn wire() {
             nav::apply_hash().await;
         })
     });
+    // ahead of every other key handler (`#go`'s included): a key during a tab drag cancels it
+    let drag_key = wasm_bindgen::closure::Closure::<dyn FnMut(KeyboardEvent)>::new(on_drag_key);
+    let _ = dom::win().add_event_listener_with_callback_and_bool(
+        "keydown",
+        drag_key.as_ref().unchecked_ref(),
+        true,
+    );
+    drag_key.forget();
     dom::on(dom::doc().as_ref(), "keydown", on_key);
-    dom::on(dom::win().as_ref(), "blur", |_: Event| LEADER.set(-1.0));
+    dom::on(dom::win().as_ref(), "blur", |_: Event| {
+        LEADER.set(-1.0);
+        panes::cancel_drag();
+    });
     // a reload inside the settings' save debounce keeps the change
     dom::on(dom::win().as_ref(), "pagehide", |_: Event| state::flush_settings());
     static RESIZE: dom::Debounce = dom::Debounce::new(150);

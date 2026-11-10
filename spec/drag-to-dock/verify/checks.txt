@@ -1,0 +1,113 @@
+# Labels the probe (dock.mjs) must print as "ok   <group>: <label>" (a prefix at column 0), by phase.
+# gate.sh reads lines "P<n>|<group>|<label>"; a label describes behaviour, never a spec id.
+# The group "all" prints once per probe run.
+P2|sweep-classic-1600|each case starts from the preset its key applies
+P2|sweep-classic-1600|the overlay shows exactly where each drop lands, and only where a drop is valid
+P2|sweep-classic-1600|a refused zone shows no overlay and its release changes nothing
+P2|sweep-classic-1600|each drop gives the defined tree, drawn and saved
+P2|sweep-classic-1600|nothing changes while a drag is under way
+P2|sweep-classic-1600|the first click after a drop acts as a click
+P3|sweep-classic-1600|after a drop the dropped view's pane is focused, the hash replaced and no history pushed
+P3|sweep-classic-1600|after a drop every shown view is drawn and fills its pane without sideways scroll
+P3|sweep-classic-1600|each drop is restored by a reload within 1 px
+P2|sweep-swapped-1600|each case starts from the preset its key applies
+P2|sweep-swapped-1600|the overlay shows exactly where each drop lands, and only where a drop is valid
+P2|sweep-swapped-1600|a refused zone shows no overlay and its release changes nothing
+P2|sweep-swapped-1600|each drop gives the defined tree, drawn and saved
+P2|sweep-swapped-1600|nothing changes while a drag is under way
+P2|sweep-swapped-1600|the first click after a drop acts as a click
+P3|sweep-swapped-1600|after a drop the dropped view's pane is focused, the hash replaced and no history pushed
+P3|sweep-swapped-1600|after a drop every shown view is drawn and fills its pane without sideways scroll
+P3|sweep-swapped-1600|each drop is restored by a reload within 1 px
+P2|sweep-stacked-1600|each case starts from the preset its key applies
+P2|sweep-stacked-1600|the overlay shows exactly where each drop lands, and only where a drop is valid
+P2|sweep-stacked-1600|a refused zone shows no overlay and its release changes nothing
+P2|sweep-stacked-1600|each drop gives the defined tree, drawn and saved
+P2|sweep-stacked-1600|nothing changes while a drag is under way
+P2|sweep-stacked-1600|the first click after a drop acts as a click
+P3|sweep-stacked-1600|after a drop the dropped view's pane is focused, the hash replaced and no history pushed
+P3|sweep-stacked-1600|after a drop every shown view is drawn and fills its pane without sideways scroll
+P3|sweep-stacked-1600|each drop is restored by a reload within 1 px
+P2|sweep-three-1600|each case starts from the preset its key applies
+P2|sweep-three-1600|the overlay shows exactly where each drop lands, and only where a drop is valid
+P2|sweep-three-1600|a refused zone shows no overlay and its release changes nothing
+P2|sweep-three-1600|each drop gives the defined tree, drawn and saved
+P2|sweep-three-1600|nothing changes while a drag is under way
+P2|sweep-three-1600|the first click after a drop acts as a click
+P3|sweep-three-1600|after a drop the dropped view's pane is focused, the hash replaced and no history pushed
+P3|sweep-three-1600|after a drop every shown view is drawn and fills its pane without sideways scroll
+P3|sweep-three-1600|each drop is restored by a reload within 1 px
+P2|sweep-classic-900|each case starts from the preset its key applies
+P2|sweep-classic-900|the overlay shows exactly where each drop lands, and only where a drop is valid
+P2|sweep-classic-900|a refused zone shows no overlay and its release changes nothing
+P2|sweep-classic-900|each drop gives the defined tree, drawn and saved
+P2|sweep-classic-900|nothing changes while a drag is under way
+P2|sweep-classic-900|the first click after a drop acts as a click
+P3|sweep-classic-900|after a drop the dropped view's pane is focused, the hash replaced and no history pushed
+P3|sweep-classic-900|after a drop every shown view is drawn and fills its pane without sideways scroll
+P3|sweep-classic-900|each drop is restored by a reload within 1 px
+P2|sweep-swapped-900|each case starts from the preset its key applies
+P2|sweep-swapped-900|the overlay shows exactly where each drop lands, and only where a drop is valid
+P2|sweep-swapped-900|a refused zone shows no overlay and its release changes nothing
+P2|sweep-swapped-900|each drop gives the defined tree, drawn and saved
+P2|sweep-swapped-900|nothing changes while a drag is under way
+P2|sweep-swapped-900|the first click after a drop acts as a click
+P3|sweep-swapped-900|after a drop the dropped view's pane is focused, the hash replaced and no history pushed
+P3|sweep-swapped-900|after a drop every shown view is drawn and fills its pane without sideways scroll
+P3|sweep-swapped-900|each drop is restored by a reload within 1 px
+P2|sweep-stacked-900|each case starts from the preset its key applies
+P2|sweep-stacked-900|the overlay shows exactly where each drop lands, and only where a drop is valid
+P2|sweep-stacked-900|a refused zone shows no overlay and its release changes nothing
+P2|sweep-stacked-900|each drop gives the defined tree, drawn and saved
+P2|sweep-stacked-900|nothing changes while a drag is under way
+P2|sweep-stacked-900|the first click after a drop acts as a click
+P3|sweep-stacked-900|after a drop the dropped view's pane is focused, the hash replaced and no history pushed
+P3|sweep-stacked-900|after a drop every shown view is drawn and fills its pane without sideways scroll
+P3|sweep-stacked-900|each drop is restored by a reload within 1 px
+P2|sweep-three-900|each case starts from the preset its key applies
+P2|sweep-three-900|the overlay shows exactly where each drop lands, and only where a drop is valid
+P2|sweep-three-900|a refused zone shows no overlay and its release changes nothing
+P2|sweep-three-900|each drop gives the defined tree, drawn and saved
+P2|sweep-three-900|nothing changes while a drag is under way
+P2|sweep-three-900|the first click after a drop acts as a click
+P3|sweep-three-900|after a drop the dropped view's pane is focused, the hash replaced and no history pushed
+P3|sweep-three-900|after a drop every shown view is drawn and fills its pane without sideways scroll
+P3|sweep-three-900|each drop is restored by a reload within 1 px
+P2|cancel-1600|Esc cancels a drag, leaves everything as it was and does nothing else
+P2|cancel-1600|another key cancels a drag, leaves the arrangement as it was and is handled as usual
+P2|cancel-1600|a release outside every pane changes nothing
+P2|cancel-1600|a release on the dragged view's own pane's centre changes nothing
+P2|cancel-1600|a release on the dragged view's own title bar changes nothing
+P2|cancel-1600|the window losing focus cancels a drag, and the release then changes nothing
+P2|cancel-1600|losing the pointer capture cancels a drag, and the release then changes nothing
+P2|cancel-900|Esc cancels a drag, leaves everything as it was and does nothing else
+P2|cancel-900|another key cancels a drag, leaves the arrangement as it was and is handled as usual
+P2|cancel-900|a release outside every pane changes nothing
+P2|cancel-900|a release on the dragged view's own pane's centre changes nothing
+P2|cancel-900|a release on the dragged view's own title bar changes nothing
+P2|cancel-900|the window losing focus cancels a drag, and the release then changes nothing
+P2|cancel-900|losing the pointer capture cancels a drag, and the release then changes nothing
+P2|click|a press and release moving under the threshold acts as a click on that tab
+P2|click|a drag back onto its own tab acts as nothing
+P2|click|a press moved 5 px and released acts as nothing, not a click
+P2|sources|each case starts from its seeded arrangement
+P2|sources|the overlay shows exactly where each drop lands, and only where a drop is valid
+P2|sources|each drop gives the defined tree, drawn and saved
+P2|sources|nothing changes while a drag is under way
+P2|sources|the first click after a drop acts as a click
+P3|sources|after a drop the dropped view's pane is focused, the hash replaced and no history pushed
+P3|sources|after a drop every shown view is drawn and fills its pane without sideways scroll
+P3|sources|each drop is restored by a reload within 1 px
+P2|refuse|each case starts from its seeded arrangement
+P2|refuse|the overlay shows exactly where each drop lands, and only where a drop is valid
+P2|refuse|a refused zone shows no overlay and its release changes nothing
+P2|refuse|each drop gives the defined tree, drawn and saved
+P2|refuse|nothing changes while a drag is under way
+P2|refuse|the first click after a drop acts as a click
+P3|refuse|after a drop the dropped view's pane is focused, the hash replaced and no history pushed
+P3|refuse|after a drop every shown view is drawn and fills its pane without sideways scroll
+P3|refuse|each drop is restored by a reload within 1 px
+P3|keyview|after a drop the view keys step as on screen, the key view on screen or not
+P3|state|a moved view keeps its scroll, the selection and the Inspector's tab
+P3|state|back and forward after a drop step through views and never undo the arrangement
+P2|all|no page errors
