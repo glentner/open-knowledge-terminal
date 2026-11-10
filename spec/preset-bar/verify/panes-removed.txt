@@ -1,0 +1,16 @@
+-//   PRESETS     classic, swapped, stacked and three at 1600 and 900 px wide, by key, by the cycle
+-//               key and by the window bar; each survives a reload and a window resize, and a reload
+-//               inside the save delay; three's
+-    check(label, bad.length === 0 && near(s.W, w, 1) && near(s.H, 890, 1), { bad, W: s.W, H: s.H });
+-const marked = page => page.evaluate(() => [...document.querySelectorAll('#presets [data-preset].on')].filter(b => b.checkVisibility()).map(b => b.dataset.preset));
+-  const keyed = [], cycled = [], reloads = [], strip = [];
+-      strip.push({ w, name, marked: await marked(page) });
+-  const none = await marked(page);
+-  // the window bar: the preset the arrangement equals is marked, none after a drag, and a click applies one
+-  const btn = await page.evaluate(() => { const b = document.querySelector('#presets [data-preset="three"]'); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+-  await page.mouse.click(btn.x, btn.y);
+-  await page.waitForTimeout(700);
+-  s = await snap(page);
+-  const clicked = grade(s, preset('three', s));
+-  const after = await marked(page);
+-  check('the window bar marks the current preset and a click applies it', strip.every(x => x.marked.join() === x.name) && none.length === 0 && clicked.length === 0 && after.join() === 'three', { strip: strip.filter(x => x.marked.join() !== x.name), none, clicked, after });

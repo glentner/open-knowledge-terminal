@@ -125,14 +125,6 @@ fn on_click(e: MouseEvent) {
         e.prevent_default();
         return;
     }
-    if let Some(b) = dom::closest(&t, "[data-preset]") {
-        // the button gives up focus, so a later space or Enter isn't a second click
-        dom::blur(&b);
-        if let Some(p) = dom::data(&b, "preset").and_then(|x| Preset::parse(&x)) {
-            nav::preset(p);
-        }
-        return;
-    }
     // a pane's tab, or a link to a view: the Inspector goes to its own placement
     if let Some(vw) = dom::closest(&t, "[data-view]") {
         match dom::data(&vw, "view").unwrap_or_default().as_str() {

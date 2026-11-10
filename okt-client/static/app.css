@@ -101,8 +101,8 @@ a { color: inherit; }
 ::-webkit-scrollbar-thumb { background: var(--line-2); border: 2px solid var(--bg-2); border-radius: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
-#app { display: grid; grid-template-rows: 38px 28px minmax(0, 1fr) var(--ticker-h) 22px; height: 100vh; }
-#app.noticker { grid-template-rows: 38px 28px minmax(0, 1fr) 0 22px; }
+#app { display: grid; grid-template-rows: 38px minmax(0, 1fr) var(--ticker-h) 22px; height: 100vh; }
+#app.noticker { grid-template-rows: 38px minmax(0, 1fr) 0 22px; }
 #app.noticker .ticker { display: none; }
 
 /* ---------- top bar ---------- */
@@ -111,7 +111,7 @@ a { color: inherit; }
 .logo { background: var(--accent); color: var(--accent-ink); font-weight: 800; padding: 1px 5px; letter-spacing: .04em; }
 .word { color: var(--accent-text); font-weight: 700; letter-spacing: .14em; font-size: 11.5px; }
 .kbname { color: var(--dim); font-size: 11.5px; }
-.go { position: relative; flex: 1; display: flex; align-items: center; min-width: 120px; max-width: 900px; height: 26px; background: var(--bg); border: 1px solid var(--line-2); }
+.go { position: relative; flex: 0 1 900px; display: flex; align-items: center; min-width: 120px; max-width: 900px; height: 26px; background: var(--bg); border: 1px solid var(--line-2); }
 .go:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
 .gol { color: var(--accent-ink); background: var(--accent); font-weight: 800; padding: 0 6px; height: 100%; display: flex; align-items: center; letter-spacing: .06em; cursor: text; }
 .gol span { margin-left: 2px; }
@@ -126,6 +126,13 @@ a { color: inherit; }
 .gosug .gm { color: var(--dim); font-size: 11px; white-space: nowrap; }
 .gosug .gh { padding: 4px 8px; color: var(--faint); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; border-top: 1px solid var(--line); }
 .gosug mark { background: none; color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
+/* the crumbs: only the room GO leaves at its full width, so they never move GO or the chips; the
+   negative margin takes back the header's gap before them, so with no room they take no space */
+.crumbs { flex: 1 1 0; min-width: 0; margin-left: -10px; display: flex; align-items: center; gap: 4px; color: var(--dim); font-size: 11.5px; overflow: hidden; white-space: nowrap; }
+.crumbs::before { content: ""; flex: none; width: 6px; }
+.crumbs button { color: var(--ink-2); }
+.crumbs button:hover { color: var(--accent-text); }
+.crumbs .sep { color: var(--faint); }
 .chips { display: flex; gap: 4px; align-items: center; flex: none; }
 .chip { height: 24px; padding: 0 8px; border: 1px solid var(--line-2); color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 11.5px; }
 .chip:hover { border-color: var(--accent); color: var(--ink); }
@@ -135,24 +142,6 @@ a { color: inherit; }
 .live.err i { background: var(--down); box-shadow: 0 0 6px var(--down); }
 .live.busy i { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
 @keyframes pulse { 50% { opacity: .35; } }
-
-/* ---------- function keys ---------- */
-.fkeys { display: flex; align-items: stretch; gap: 2px; padding: 0 6px; background: var(--bg-2); border-bottom: 1px solid var(--line); min-width: 0; }
-.fk { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px 0 4px; color: var(--ink-2); font-size: 11.5px; letter-spacing: .08em; border-bottom: 2px solid transparent; }
-.fk kbd { background: var(--bg-4); color: var(--accent-text); border: 1px solid var(--line-2); padding: 0 4px; font-size: 10.5px; line-height: 16px; min-width: 16px; text-align: center; }
-.fk:hover { color: var(--ink); }
-.fk.on { color: var(--ink); border-bottom-color: var(--accent); }
-.fk.on kbd { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-/* the presets: a click applies one, and the one the arrangement equals is marked */
-.presets { display: flex; align-items: stretch; gap: 2px; min-width: 0; overflow: hidden; }
-.pre { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; color: var(--ink-2); font-size: 11px; letter-spacing: .08em; white-space: nowrap; border-bottom: 2px solid transparent; }
-.pre kbd { background: var(--bg-4); color: var(--accent-text); border: 1px solid var(--line-2); padding: 0 4px; font-size: 10.5px; line-height: 15px; min-width: 16px; text-align: center; }
-.pre:hover { color: var(--ink); }
-.pre.on { color: var(--ink); border-bottom-color: var(--accent); }
-.crumbs { margin-left: auto; display: flex; align-items: center; gap: 4px; color: var(--dim); font-size: 11.5px; min-width: 0; overflow: hidden; white-space: nowrap; }
-.crumbs button { color: var(--ink-2); }
-.crumbs button:hover { color: var(--accent-text); }
-.crumbs .sep { color: var(--faint); }
 
 /* ---------- panes ---------- */
 /* The arrangement: a tree of splits (.psplit, side by side or stacked) whose leaves are panes

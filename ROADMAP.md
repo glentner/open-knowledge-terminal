@@ -98,6 +98,24 @@ space under the header, though the keys, the `p` cycler and `?` already cover th
 
 **Seed:** [`issues/preset-bar.md`](issues/preset-bar.md)
 
+### 8. The KB name twice in the header
+
+With nothing selected, a wide window shows the KB name twice: in the brand, and again as the only
+crumb after GO (on `main` the second copy sat in the row below). Show it once, if Geoffrey wants it
+changed. The same seed records that a long KB display name widens the brand until the crumbs have
+no room, even at 1600 px.
+
+**Seed:** [`issues/crumbs-kb-name-twice.md`](issues/crumbs-kb-name-twice.md)
+
+### 9. The SERVER STOPPED banner over the pane title bars
+
+The banner was placed 44 px from the top for the preset row that preset-bar removed, so while the
+event stream is down it now covers 18 of the 24 px of the panes' title bars at every width. On
+`main` it covered 6.7 px at 1196 px and wider, and 23.3 px below that, where it wraps to two lines.
+Move it to the header's bottom edge clear of them at both heights, or make the overlay deliberate.
+
+**Seed:** [`issues/offbar-placement.md`](issues/offbar-placement.md)
+
 ---
 
 ## Settled questions

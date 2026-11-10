@@ -122,11 +122,6 @@ pub fn apply() {
     if let Some(el) = skeleton(&host) {
         update(&el, &root, focus);
     }
-    let current = arrange::which(&root, arrange::classic_share(cfg().insp));
-    for b in dom::qa("#presets [data-preset]") {
-        let on = current.is_some_and(|p| dom::data(&b, "preset").as_deref() == Some(p.name()));
-        dom::toggle(&b, "on", on);
-    }
     graph::fit_pane();
     let now = on_screen();
     ON.with(|o| *o.borrow_mut() = now);

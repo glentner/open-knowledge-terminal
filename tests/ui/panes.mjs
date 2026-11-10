@@ -16,9 +16,9 @@
 //               forward place the view; a view coming on screen by itself (a reload, a bookmark,
 //               a window grown) moves no focus, hash or history
 //   DRAG        a split follows the pointer, stops at its floors, and survives a reload
-//   PRESETS     classic, swapped, stacked and three at 1600 and 900 px wide, by key, by the cycle
-//               key and by the window bar; each survives a reload and a window resize, and a reload
-//               inside the save delay; three's
+//   PRESETS     classic, swapped, stacked and three at 1600 and 900 px wide, by key and by the cycle
+//               key, and each key again after a drag; each survives a reload and a window resize,
+//               and a reload inside the save delay; three's
 //               Graph bar, Inspector and Files; the Graph hit-tested after a move; the help rows
 //   COLLAPSE    a strip side by side, a title bar stacked, expand restoring the size, the
 //               accordion, and the pane leader's waiting, cancelling and timing out
@@ -153,7 +153,9 @@ async function drag(page, from, to, mid) {
     const { ctx, page, stored } = await open(w);
     const s = await snap(page);
     const bad = grade2(s, want(s), HELD, ['graph', 'insp']);
-    check(label, bad.length === 0 && near(s.W, w, 1) && near(s.H, 890, 1), { bad, W: s.W, H: s.H });
+    // the root spans the window between the header and the ticker: 1000 less the 38 px header,
+    // the 22 px ticker and the 22 px status bar
+    check(label, bad.length === 0 && near(s.W, w, 1) && near(s.H, 918, 1), { bad, W: s.W, H: s.H });
     // the graph's all-labels toggle saves the settings; the default stays unsaved
     await page.click('#v-graph .gtools button[data-z="labels"]');
     await page.waitForTimeout(700);
@@ -722,10 +724,9 @@ async function survives(ctx, page) {
   await fresh.close();
   return { ok: stored && alike(before, after) && alike(before, bare), stored, before: drawn(before), after: drawn(after), bare: drawn(bare) };
 }
-const marked = page => page.evaluate(() => [...document.querySelectorAll('#presets [data-preset].on')].filter(b => b.checkVisibility()).map(b => b.dataset.preset));
 {
   const rects = { classic: [], swapped: [], stacked: [], three: [] };
-  const keyed = [], cycled = [], reloads = [], strip = [];
+  const keyed = [], cycled = [], reloads = [];
   for (const w of [1600, 900]) {
     const { ctx, page } = await open(w);
     // each key from another preset, classic last
@@ -735,7 +736,6 @@ const marked = page => page.evaluate(() => [...document.querySelectorAll('#prese
       const bad = grade(s, preset(name, s));
       rects[name].push({ w, bad });
       keyed.push({ w, name, ok: bad.length === 0 });
-      strip.push({ w, name, marked: await marked(page) });
       const r = await survives(ctx, page);
       reloads.push({ w, name, ...r });
     }
@@ -755,7 +755,6 @@ const marked = page => page.evaluate(() => [...document.querySelectorAll('#prese
   const R = await page.evaluate(() => { const r = document.getElementById('panes').getBoundingClientRect(); return { top: r.top, H: r.height }; });
   const at = await sash(page);
   if (at) await drag(page, at, { x: at.x, y: R.top + 300 });
-  const none = await marked(page);
   await press(page, 'p', 700);
   let s = await snap(page);
   const fromNone = grade(s, preset('classic', s));
@@ -776,14 +775,21 @@ const marked = page => page.evaluate(() => [...document.querySelectorAll('#prese
     await q.ctx.close();
   }
   check('a preset applied just before a reload is kept', quick.every(x => x.pending && x.stored && x.bad.length === 0), quick);
-  // the window bar: the preset the arrangement equals is marked, none after a drag, and a click applies one
-  const btn = await page.evaluate(() => { const b = document.querySelector('#presets [data-preset="three"]'); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
-  await page.mouse.click(btn.x, btn.y);
-  await page.waitForTimeout(700);
-  s = await snap(page);
-  const clicked = grade(s, preset('three', s));
-  const after = await marked(page);
-  check('the window bar marks the current preset and a click applies it', strip.every(x => x.marked.join() === x.name) && none.length === 0 && clicked.length === 0 && after.join() === 'three', { strip: strip.filter(x => x.marked.join() !== x.name), none, clicked, after });
+  // each key again after a drag: the drag moves the arrangement off the preset (so a drag that
+  // did nothing can't pass), and the same key puts every pane back on the preset's rects
+  const again = [];
+  for (const name of ['classic', 'swapped', 'stacked', 'three']) {
+    await press(page, PRESET[name], 700);
+    // the first visible sash, moved 120 px across its own line
+    const from = await page.evaluate(() => { const e = [...document.querySelectorAll('#panes .sash')].find(x => x.checkVisibility()); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, upright: r.width < r.height }; });
+    if (from) await drag(page, from, from.upright ? { x: from.x + 120, y: from.y } : { x: from.x, y: from.y + 120 });
+    const ds = await snap(page);
+    const moved = grade(ds, preset(name, ds));
+    await press(page, PRESET[name], 700);
+    s = await snap(page);
+    again.push({ name, sash: !!from, moved: moved.length > 0, bad: grade(s, preset(name, s)) });
+  }
+  check('each preset key applied again after a drag restores its rects', again.length === 4 && again.every(a => a.sash && a.moved && a.bad.length === 0), again);
   await ctx.close();
 }
 // a chosen arrangement is kept at any window width, its shares holding

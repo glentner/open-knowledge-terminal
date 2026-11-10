@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:preset-bar
 kind: fix
 appetite: small
 ---

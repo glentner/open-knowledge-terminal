@@ -1,0 +1,37 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: preset-bar
+escaped_from: none
+planned: {date: '2026-11-09', phases: 1}
+landed: {date: '2026-11-09', phases: 1, failed_verifies: 1}
+open: null
+runs:
+- {step: feature, start: '2026-11-09T17:05:54-05:00', stop: '2026-11-09T17:09:15-05:00', seconds: 201, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-11-09T17:09:15-05:00', stop: '2026-11-09T18:11:33-05:00', seconds: 3738, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-11-09T18:11:33-05:00', stop: '2026-11-09T18:33:46-05:00', seconds: 1333, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-09T18:33:46-05:00', stop: '2026-11-09T19:06:51-05:00', seconds: 1985, end: gate, agent: claude-opus-5-5}
+- {step: 'build:remediation-1', start: '2026-11-09T19:06:51-05:00', stop: '2026-11-09T19:12:29-05:00', seconds: 338, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-09T19:12:29-05:00', stop: '2026-11-09T19:17:42-05:00', seconds: 313, end: gate, agent: claude-opus-5-5}
+- {step: 'build:remediation-2', start: '2026-11-09T19:17:42-05:00', stop: '2026-11-09T19:19:11-05:00', seconds: 89, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-09T19:19:11-05:00', stop: '2026-11-09T19:21:03-05:00', seconds: 112, end: question, agent: claude-opus-5-5}
+- {step: publish, start: '2026-11-09T23:15:29-05:00', stop: '2026-11-09T23:16:29-05:00', seconds: 60, end: done, agent: claude-opus-5-5}
+reviews:
+- cycle: 1
+  date: '2026-11-09'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 1}
+  plausible: 1
+- cycle: 2
+  date: '2026-11-09'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 1}
+  plausible: 0
+- cycle: 3
+  date: '2026-11-09'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 1}
+  plausible: 0
+- cycle: 4
+  date: '2026-11-09'
+  verdict: approved
+  confirmed: {critical: 0, high: 0, medium: 0, low: 1}
+  plausible: 0

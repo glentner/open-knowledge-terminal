@@ -215,15 +215,6 @@ impl Preset {
         Preset::Three,
     ];
 
-    pub fn name(self) -> &'static str {
-        match self {
-            Preset::Classic => "classic",
-            Preset::Swapped => "swapped",
-            Preset::Stacked => "stacked",
-            Preset::Three => "three",
-        }
-    }
-
     /// The key that applies it.
     pub fn key(self) -> &'static str {
         match self {
@@ -232,10 +223,6 @@ impl Preset {
             Preset::Stacked => "\\",
             Preset::Three => "`",
         }
-    }
-
-    pub fn parse(s: &str) -> Option<Preset> {
-        Preset::ALL.into_iter().find(|p| p.name() == s)
     }
 
     pub fn from_key(k: &str) -> Option<Preset> {
@@ -1121,7 +1108,6 @@ mod tests {
             assert_eq!(sanitise(n.clone()), Some(n.clone()), "{p:?} is already sane");
             assert_eq!(which(&n, 0.54), Some(p));
             assert_eq!(Preset::from_key(p.key()), Some(p));
-            assert_eq!(Preset::parse(p.name()), Some(p));
         }
         assert_eq!(pane_views(&three()), vec![
             vec!["graph"],

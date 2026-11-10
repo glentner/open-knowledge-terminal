@@ -1,0 +1,12 @@
+# Labels tests/ui/panes.mjs must print as "ok   <label>" (a prefix match at column 0). The first is
+# the check this cycle adds in place of the window bar's (GOAL R7); the rest are the preset checks
+# it keeps (R6), named here as well as in kept.mjs so the phase's own checks read in one place.
+each preset key applied again after a drag restores its rects
+each preset key applies its preset and p cycles them in order
+classic matches its rects at 1600 and 900
+swapped matches its rects at 1600 and 900
+stacked matches its rects at 1600 and 900
+three matches its rects at 1600 and 900
+every preset survives a reload within 1 px
+every preset at both sizes graded from rects
+the help lists the preset keys

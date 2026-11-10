@@ -25,6 +25,7 @@
       <input id="go" spellcheck="false" placeholder="file, folder, or command — try LOG, FIND inbox, TABLE contact/, HELP" aria-label="Command line">
       <div class="gosug" id="gosug" hidden></div>
     </form>
+    <div class="crumbs" id="crumbs"></div>
     <div class="chips">
       <button class="chip live" id="live" title="Watching for saved files and new commits"><i></i><span>LIVE</span></button>
       <button class="chip" id="headchip" title="HEAD"></button>
@@ -33,16 +34,6 @@
       <button class="chip icon" id="helpbtn" title="Help (?)">?</button>
     </div>
   </header>
-
-  <nav class="fkeys" aria-label="Window">
-    <div class="presets" id="presets" aria-label="Arrangements">
-      <button class="pre" data-preset="classic" title="Views left, Inspector right (;)">CLASSIC<kbd>;</kbd></button>
-      <button class="pre" data-preset="swapped" title="Inspector left, views right (')">SWAPPED<kbd>'</kbd></button>
-      <button class="pre" data-preset="stacked" title="Views on top, Inspector below (\)">STACKED<kbd>\</kbd></button>
-      <button class="pre" data-preset="three" title="Graph bar on top, Inspector left, Files right (`)">THREE<kbd>`</kbd></button>
-    </div>
-    <div class="crumbs" id="crumbs"></div>
-  </nav>
 
   <main class="panes" id="panes">
     <div id="parking" hidden>
