@@ -102,9 +102,10 @@ crumbs have no room, even at 1600 px.
 ### 8. The SERVER STOPPED banner over the pane title bars
 
 The banner was placed 44 px from the top for the preset row that preset-bar removed, so while the
-event stream is down it now covers 18 of the 24 px of the panes' title bars at every width. On
-`main` it covered 6.7 px at 1196 px and wider, and 23.3 px below that, where it wraps to two lines.
-Move it to the header's bottom edge clear of them at both heights, or make the overlay deliberate.
+event stream is down it now covers 18 of the 24 px of the panes' title bars at every width. At
+0.4.0 it covered 6.7 px at 1196 px and wider; 23.3 px from 1195 to 618 px, where it wraps to two
+lines; and all 24 px at 617 px and narrower, where it wraps to three (four at 430 px). Move it to
+the header's bottom edge clear of them at every height, or make the overlay deliberate.
 
 **Seed:** [`issues/offbar-placement.md`](issues/offbar-placement.md)
 
