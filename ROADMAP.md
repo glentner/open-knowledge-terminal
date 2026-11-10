@@ -90,24 +90,16 @@ and no suite check would notice it gone (30 renders for a 30-move drag, against 
 
 **Seed:** [`issues/sash-drag-redraw-guard.md`](issues/sash-drag-redraw-guard.md)
 
-### 7. No always-on preset bar
-
-The preset buttons (CLASSIC `;`, SWAPPED `'`, STACKED `\`, THREE `` ` ``) take a row of vertical
-space under the header, though the keys, the `p` cycler and `?` already cover them. Remove the bar
-(Geoffrey's preference), or at most fold it into the top bar at the far right.
-
-**Seed:** [`issues/preset-bar.md`](issues/preset-bar.md)
-
-### 8. The KB name twice in the header
+### 7. The KB name twice in the header
 
 With nothing selected, a wide window shows the KB name twice: in the brand, and again as the only
-crumb after GO (on `main` the second copy sat in the row below). Show it once, if Geoffrey wants it
-changed. The same seed records that a long KB display name widens the brand until the crumbs have
-no room, even at 1600 px.
+crumb after GO (before preset-bar the second copy sat in the row below). Show it once, if Geoffrey
+wants it changed. The same seed records that a long KB display name widens the brand until the
+crumbs have no room, even at 1600 px.
 
 **Seed:** [`issues/crumbs-kb-name-twice.md`](issues/crumbs-kb-name-twice.md)
 
-### 9. The SERVER STOPPED banner over the pane title bars
+### 8. The SERVER STOPPED banner over the pane title bars
 
 The banner was placed 44 px from the top for the preset row that preset-bar removed, so while the
 event stream is down it now covers 18 of the 24 px of the panes' title bars at every width. On

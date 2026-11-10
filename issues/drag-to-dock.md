@@ -43,7 +43,7 @@ arrangement the `w` operations would make, saved the same way.
 ## Notes
 
 - Floating or undocked windows stay out of scope, as in pane-arrangements.
-- Related: `issues/preset-bar.md`. If the preset bar goes, drag-to-dock becomes the main mouse path
-  for arranging.
+- Related: the preset bar's removal, shipped 2026-11-09 (`spec/preset-bar/`), which leaves
+  drag-to-dock the main mouse path for arranging.
 - 2026-11-09: the preset bar is gone (preset-bar); drag-to-dock is the mouse path to an arrangement
   still to come.
