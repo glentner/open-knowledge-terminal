@@ -101,6 +101,22 @@ the header's bottom edge clear of them at every height, or make the overlay deli
 
 **Seed:** [`issues/offbar-placement.md`](issues/offbar-placement.md)
 
+# Part IV — Other devices
+
+okt served from the Mac to Geoffrey's iPhone and iPad over Tailscale. Geoffrey named this as the
+next direction on 2026-11-11.
+
+### 8. okt on an iPhone and an iPad over Tailscale
+
+okt answers only on loopback by default, refuses any other `Host`, and needs a fresh link after
+every restart. Once loaded on a phone, the header is wider than the screen, every touch target is
+under 44 px, GO's input zooms the page, and most navigation is keyboard only. Make okt reachable
+over the tailnet by HTTPS, with a single-view, touch-first layout on the iPhone and touch-sized
+panes on the iPad, and leave the desktop as it is. This likely splits into two cycles, access
+first.
+
+**Seed:** [`issues/mobile-responsive.md`](issues/mobile-responsive.md)
+
 ---
 
 ## Settled questions
