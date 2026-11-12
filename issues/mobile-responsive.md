@@ -82,26 +82,46 @@ Not a deferral: a new direction Geoffrey asked for on 2026-11-11, seeded for sha
 introduced it. It is big and likely splits into two cycles at shaping, access first, because the
 layout can't be tried on a device until the device can reach the server.
 
+## Clarifications (Geoffrey, 2026-11-12)
+
+- **Reading only.** On the devices Geoffrey searches and views; nothing else has to work there.
+  EDIT, OPEN, REVEAL and the other launch actions are out of scope on a device.
+- **Behind `tailscale serve`.** okt stays bound to loopback and `tailscale serve` provides HTTPS
+  at the Mac's MagicDNS name. okt serves no HTTPS of its own.
+
+What that settles, and what it leaves:
+- On loopback `--require-token` stays off (`main.rs:605-607`), so today every request through
+  `tailscale serve` would be let in without a link. What still blocks it is the `Host` check, if
+  the proxy passes the ts.net name through; whether it does is to verify.
+- Every proxied request arrives from `127.0.0.1`, so okt can't tell a device from the Mac by its
+  peer address. It can by `Host` (the ts.net name), or by the identity headers `tailscale serve`
+  adds (`Tailscale-User-Login`), also to verify. That is how the launch actions get refused for a
+  device.
+- Reading only means the server refuses the launch POSTs from a device, not just that the client
+  hides their buttons: hiding alone would leave `/api/open` one request away.
+
 ## Outcome / vision
 
-From his iPhone or iPad, anywhere on his tailnet, Geoffrey opens okt over HTTPS by its MagicDNS
-name, installs it to the home screen once, and it keeps working across server restarts. On the
-iPhone it is a single-view reader: one view fills the screen, a thumb-reachable control switches
-views, GO is reachable and doesn't zoom the page, the Inspector reads well, and the graph pans
-and pinches. On the iPad it keeps the panes, with touch-sized targets, and works with or without a
-keyboard. On the Mac, at desktop widths, nothing changes.
+From his iPhone or iPad, anywhere on his tailnet, Geoffrey opens okt at the Mac's MagicDNS name
+over HTTPS (`tailscale serve`), installs it to the home screen once, and it keeps working across
+server restarts. It is a reader: he types into GO to search, opens a result, and reads the file in
+the Inspector, with back and forward. On the iPhone one view fills the screen, a thumb-reachable
+control switches views, GO is reachable and doesn't zoom the page, and the Inspector reads well.
+On the iPad it keeps the panes, with touch-sized targets, and works with or without a keyboard.
+Nothing that edits, launches or rearranges has to work on a device. On the Mac, at desktop widths,
+nothing changes.
 
 ## Sketch of the acceptance criteria
 
 Access:
-- **R1** WHEN okt is reached through an HTTPS name Geoffrey configures (a MagicDNS name behind
-  `tailscale serve`, say), it SHALL serve every route, live updates included, while the default
-  stays loopback-only and every other `Host` is still refused.
-- **R2** A device that has been let in once SHALL stay let in across a server restart and a
-  `make install`, including okt installed to the iOS home screen, without exposing the KB to a
-  device that was never let in.
-- **R3** WHERE a request comes from another device, the launch actions (EDIT, OPEN, REVEAL) SHALL
-  either be hidden there or do what shaping decides, never silently open an app on the Mac.
+- **R1** WHEN okt is reached through `tailscale serve` at the Mac's MagicDNS name, it SHALL serve
+  every read route, live updates included, while it stays bound to loopback and every other `Host`
+  is still refused.
+- **R2** An installed home-screen okt on iOS SHALL keep working across a server restart and a
+  `make install`, without being handed a new link.
+- **R3** WHEN a request comes through `tailscale serve`, the server SHALL refuse the launch actions
+  (EDIT, OPEN, REVEAL and any other POST that acts on the Mac), and the client SHALL hide their
+  controls.
 
 Layout:
 - **R4** At 375–430 px wide (iPhone portrait), no part of the page SHALL extend past the screen's
@@ -110,9 +130,10 @@ Layout:
 - **R6** Focusing GO, or any other text input, SHALL NOT zoom the page on iOS Safari.
 - **R7** On a phone, one view SHALL fill the screen below the header, with a touch control that
   switches between every view, Inspector included.
-- **R8** Every action the keyboard reaches that shaping marks essential for reading (open, back
-  and forward, find, switch view, switch inspector tab, pins) SHALL have a touch route.
-- **R9** The graph SHALL pan by one-finger drag and zoom by pinch.
+- **R8** Searching and viewing SHALL work by touch alone: type a search or a FIND into GO, open a
+  result, read it in the Inspector (content and source), switch Inspector tabs, and go back and
+  forward.
+- **R9** WHERE the graph is shown on a device, it SHALL pan by one-finger drag and zoom by pinch.
 - **R10** At desktop widths with a fine pointer, layout and behaviour SHALL stay as they are
   today: `keys.mjs`, `panes.mjs` and `dock.mjs` unchanged and passing.
 - **R11** The browser suites SHALL grade R4–R9 at iPhone and iPad sizes with touch input,
@@ -120,14 +141,14 @@ Layout:
 
 ## Notes
 
-- Questions for shaping:
-  - Is the iPhone a reader only, or does it edit? EDIT has no meaning there today.
-  - Is the tailnet the security boundary, with the token dropped behind `tailscale serve`? Or does
-    the token stay, made long-lived and per device?
-  - Does okt serve HTTPS itself, with a Tailscale certificate, or stay plain HTTP behind
-    `tailscale serve`? The second keeps the server unchanged except for the `Host` allowlist.
-  - On iPad, should touch drag-to-dock and sash drags be in scope, or is the iPad layout read-only?
-  - What is "solid"? A short list of tasks done on each device would make R8 gradeable.
+- Questions still open for shaping:
+  - Is the tailnet the whole security boundary? With okt on loopback behind `tailscale serve`,
+    every device and user the tailnet lets reach the Mac can read the KB. The alternative is a
+    long-lived, per-device token or a check on the `Tailscale-User-Login` header.
+  - Do the graph, Log and Table views come along to the phone, or only GO, the results and the
+    Inspector? That decides whether R9 is in scope.
+  - Pane rearranging on the iPad (drag-to-dock, sash drags, the `w` keys) is out under "reading
+    only" unless Geoffrey wants it back.
 - The KB holds Purdue work. Which devices and which tailnet see it is Geoffrey's call, and shaping
   should write that call into the GOAL.
 - The probe's mobile emulation is Chromium, not Safari. Safari's viewport, input-zoom and
@@ -135,5 +156,5 @@ Layout:
   harness is untested.
 - Related: `issues/offbar-placement.md` (the SERVER STOPPED banner wraps to three or four lines at
   phone widths) and `issues/crumbs-kb-name-twice.md` (the header's crumbs).
-- Found by: Geoffrey's request in session, 2026-11-11; evidence from the foreman's probe on
-  2026-11-12.
+- Found by: Geoffrey's request in session, 2026-11-11; clarified 2026-11-12 (reading only, behind
+  `tailscale serve`); evidence from the foreman's probe on 2026-11-12.

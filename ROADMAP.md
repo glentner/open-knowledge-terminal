@@ -110,10 +110,10 @@ next direction on 2026-11-11.
 
 okt answers only on loopback by default, refuses any other `Host`, and needs a fresh link after
 every restart. Once loaded on a phone, the header is wider than the screen, every touch target is
-under 44 px, GO's input zooms the page, and most navigation is keyboard only. Make okt reachable
-over the tailnet by HTTPS, with a single-view, touch-first layout on the iPhone and touch-sized
-panes on the iPad, and leave the desktop as it is. This likely splits into two cycles, access
-first.
+under 44 px, GO's input zooms the page, and most navigation is keyboard only. Make okt a reader
+on the devices, reached through `tailscale serve` at the Mac's MagicDNS name: search and view
+by touch, with the launch actions refused, a single-view layout on the iPhone and touch-sized
+panes on the iPad. Leave the desktop as it is. This likely splits into two cycles, access first.
 
 **Seed:** [`issues/mobile-responsive.md`](issues/mobile-responsive.md)
 
